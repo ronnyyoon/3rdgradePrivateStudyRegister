@@ -1,0 +1,83 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Noto+Sans+KR:wght@300;400;500;700;900&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+/* 
+  =========================================
+  [ 2026학년도 3학년실 자율학습 출석부 - 사용자 정의 CSS 변수 ]
+  관리자 및 교사가 디자인 요소(색상, 폰트 등)를 아주 손쉽게 
+  커스터마이징할 수 있도록 설계된 :root 설정입니다.
+  =========================================
+*/
+:root {
+  /* 대표 폰트 설정 (영문용과 국문용의 조화로운 결합) */
+  --font-sans: 'Pretendard', 'Noto Sans KR', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-display: 'Space Grotesk', 'Noto Sans KR', sans-serif;
+
+  /* 핵심 테마 색상 (Elegant Dark 테마) */
+  --color-bg-dark: #121212;            /* 메인 백그라운드 칠흑색 */
+  --color-bg-card: #1E1E1E;            /* 대시보드 카드 및 테이블 컴포넌트 프리미엄 회색 */
+  --color-bg-input: #262626;           /* 입력란 및 중간 회색 */
+  --color-border: rgba(255, 215, 0, 0.15); /* 은은한 옐로우 골드 경계선 */
+
+  /* 노란색 포인트 컬러 군 */
+  --color-point-yellow: #FFD700;       /* 포인트 액센트 골드 옐로우 */
+  --color-yellow-hover: #E6C200;       /* 호버 상태 골드 옐로우 */
+  --color-yellow-glow: rgba(255, 215, 0, 0.15); /* 은은한 네온 효과 */
+
+  /* 학생 출결 상태 색상 설정 (Elegant Dark 가이드 준수) */
+  --color-status-present: #FFD700;     /* 출석: 골드 액센트 */
+  --color-status-late: #FFA500;        /* 지각: 경고 오렌지 */
+  --color-status-absent: #FF4444;      /* 결석: 강렬한 크림슨 레드 */
+  --color-status-early: #3B82F6;       /* 조퇴: 사파이어 블루 */
+  --color-status-other: #8B5CF6;       /* 기타: 퍼플 */
+}
+
+/* Tailwind v4에 맞춘 커스텀 세팅 통합 */
+@theme {
+  --font-sans: var(--font-sans);
+  --font-display: var(--font-display);
+  --color-bg-dark: var(--color-bg-dark);
+  --color-bg-card: var(--color-bg-card);
+  --color-bg-input: var(--color-bg-input);
+  --color-point-yellow: var(--color-point-yellow);
+  --color-yellow-hover: var(--color-yellow-hover);
+  --color-border-custom: var(--color-border);
+}
+
+/* 전역 기본 디자인 리셋 및 세련된 스크롤바 세팅 */
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-bg-dark);
+  color: #f3f4f6;
+  overflow-x: hidden;
+}
+
+/* 우아한 크롬 스크롤바 디자인 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-bg-dark);
+}
+::-webkit-scrollbar-thumb {
+  background: #2d2d34;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-point-yellow);
+}
+
+/* 자율학습 출석 체크 및 강조 전용 클래스 */
+.glow-card {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.glow-card:hover {
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.7);
+  border-color: var(--color-point-yellow);
+}
+
+/* 체크 오버레이 뷰포트용 트랜지션 */
+.transition-all-300 {
+  transition: all 0.3s ease-in-out;
+}

@@ -1,0 +1,6 @@
+{
+  "name": "2026학년도 3학년실 자율학습 출석부",
+  "description": "2026학년도 3학년실 학생들의 월요일부터 토요일까지 자율학습 출석 상태를 관리하고 통계를 확인할 수 있는 고품격 출석 관리 프로그램입니다.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
