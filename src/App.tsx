@@ -962,15 +962,16 @@ export default function App() {
 
               {/* [요구사항 5, 6, 7] 자율학습명단 메인 리스트 보드 */}
               <div className="bg-[#1E1E1E] rounded-2xl border border-[rgba(255,215,0,0.12)] overflow-hidden shadow-xl">
-                <div className="px-6 py-4.5 border-b border-zinc-800 bg-[#262626]/30 flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-white flex items-center space-x-2">
+                <div className="px-3 sm:px-6 py-3 sm:py-4.5 border-b border-zinc-800 bg-[#262626]/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <h3 className="text-sm font-bold text-white flex items-center flex-wrap gap-1 sm:gap-2">
                     <span className="w-1.5 h-3.5 bg-[var(--color-point-yellow)] rounded-full" />
                     <span>자율학습명단</span>
-                    <span className="ml-1 text-[11px] text-zinc-500">[{activeTabDay}요일 기준 배정 명부]</span>
+                    <span className="text-[11px] text-zinc-500">[{activeTabDay}요일 기준 배정 명부]</span>
                   </h3>
                   
-                  <span className="text-[10.5px] text-zinc-400 bg-zinc-900 px-2.5 py-1 rounded-md font-medium border border-zinc-800">
-                    💡 각 교시를 클릭하면 다음 상태로 바뀝니다
+                  <span className="text-[10px] sm:text-[10.5px] text-zinc-400 bg-zinc-900 px-2 py-1 rounded-md font-medium border border-zinc-800 self-start sm:self-auto">
+                    <span className="hidden sm:inline">💡 각 교시를 클릭하면 다음 상태로 바뀝니다</span>
+                    <span className="inline sm:hidden">💡 클릭 시 출석 상태 변경</span>
                   </span>
                 </div>
 
@@ -978,16 +979,16 @@ export default function App() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="bg-[#262626]/40 border-b border-zinc-800 text-[11px] font-bold text-zinc-400 leading-none">
-                        <th className="py-4 px-6 whitespace-nowrap">배정 자습실</th>
-                        <th className="py-4 px-4 whitespace-nowrap">학번</th>
-                        <th className="py-4 px-4 whitespace-nowrap">이름</th>
-                        <th className="py-4 px-4 text-center whitespace-nowrap">1교시</th>
-                        <th className="py-4 px-4 text-center whitespace-nowrap">2교시</th>
+                      <tr className="bg-[#262626]/40 border-b border-zinc-800 text-[10px] sm:text-[11px] font-bold text-zinc-400 leading-none">
+                        <th className="py-2.5 sm:py-4 px-2 sm:px-6 whitespace-nowrap">자습실</th>
+                        <th className="py-2.5 sm:py-4 px-1.5 sm:px-4 whitespace-nowrap">학번</th>
+                        <th className="py-2.5 sm:py-4 px-1.5 sm:px-4 whitespace-nowrap">이름</th>
+                        <th className="py-2.5 sm:py-4 px-1.5 sm:px-4 text-center whitespace-nowrap">1교시</th>
+                        <th className="py-2.5 sm:py-4 px-1.5 sm:px-4 text-center whitespace-nowrap">2교시</th>
                         {activeTabDay === '수' && (
-                          <th className="py-4 px-4 text-center whitespace-nowrap">3교시</th>
+                          <th className="py-2.5 sm:py-4 px-1.5 sm:px-4 text-center whitespace-nowrap">3교시</th>
                         )}
-                        <th className="py-4 px-6 text-right whitespace-nowrap">관리 제어</th>
+                        <th className="py-2.5 sm:py-4 px-2 sm:px-6 text-right whitespace-nowrap">관리 제어</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-800 text-xs">
@@ -1011,9 +1012,9 @@ export default function App() {
                               }`}
                             >
                               {/* 요주의 교실 및 경고 마킹 */}
-                              <td className="py-3 px-6 whitespace-nowrap">
-                                <span className="flex items-center space-x-2">
-                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
+                              <td className="py-2 sm:py-3 px-2 sm:px-6 whitespace-nowrap">
+                                <span className="flex items-center space-x-1 sm:space-x-2">
+                                  <span className={`px-1.5 sm:px-2 py-0.5 rounded text-[9.5px] sm:text-[10px] font-bold font-mono ${
                                     student.classroom === '셀터디' 
                                       ? 'bg-purple-950/45 text-purple-400 border border-purple-800/30'
                                       : 'bg-zinc-800 text-zinc-300 border border-zinc-700/50'
@@ -1022,33 +1023,34 @@ export default function App() {
                                   </span>
 
                                   {hasWarning && (
-                                    <span className="flex items-center space-x-0.5 bg-red-950 text-red-400 border border-red-900/50 px-1.5 py-0.5 rounded text-[9.5px] font-bold animate-pulse">
-                                      <span>⚠️ 경고</span>
+                                    <span className="flex items-center space-x-0.5 bg-red-950 text-red-400 border border-red-900/50 px-1 sm:px-1.5 py-0.5 rounded text-[9px] sm:text-[9.5px] font-bold animate-pulse" title="경고 대상자">
+                                      <span>⚠️</span>
+                                      <span className="hidden sm:inline">경고</span>
                                     </span>
                                   )}
                                 </span>
                               </td>
 
-                              {/* 학번 (구 성별 컬럼 완전 삭제 처리) */}
-                              <td className="py-3 px-4 font-mono font-semibold text-zinc-400 whitespace-nowrap">
+                              {/* 학번 */}
+                              <td className="py-2 sm:py-3 px-1.5 sm:px-4 font-mono font-semibold text-zinc-500 text-[10.5px] sm:text-xs whitespace-nowrap">
                                 {student.studentId}
                               </td>
 
-                              {/* 이름 (클릭 세부 연혁 표출 트리거) */}
-                              <td className="py-3 px-4 whitespace-nowrap">
+                              {/* 이름 */}
+                              <td className="py-2 sm:py-3 px-1.5 sm:px-4 whitespace-nowrap">
                                 <button
                                   onClick={() => openStudentDetail(student)}
-                                  className="font-bold text-white hover:text-[var(--color-point-yellow)] transition hover:underline cursor-pointer text-left focus:outline-none whitespace-nowrap inline-block"
+                                  className="font-bold text-white hover:text-[var(--color-point-yellow)] transition hover:underline cursor-pointer text-left focus:outline-none text-[11px] sm:text-xs whitespace-nowrap inline-block"
                                 >
                                   {student.name}
                                 </button>
                               </td>
 
                               {/* 1교시 출석 상태 블록 */}
-                              <td className="py-3 px-4 text-center whitespace-nowrap">
+                              <td className="py-2 sm:py-3 px-1.5 sm:px-4 text-center whitespace-nowrap">
                                 <button
                                   onClick={() => handlePeriodClick(student.id, activeTabDay, 'p1')}
-                                  className={`px-3.5 py-1.5 rounded-lg text-[11px] font-bold tracking-tight inline-block cursor-pointer transition focus:scale-95 whitespace-nowrap ${getStatusBadgeStyle(
+                                  className={`px-2 sm:px-3.5 py-1 sm:py-1.5 rounded-md sm:rounded-lg text-[10px] sm:text-[11px] font-bold tracking-tight inline-block cursor-pointer transition focus:scale-95 whitespace-nowrap ${getStatusBadgeStyle(
                                     student.attendance[activeTabDay]?.p1 || '미확인'
                                   )}`}
                                 >
@@ -1057,10 +1059,10 @@ export default function App() {
                               </td>
 
                               {/* 2교시 출석 상태 블록 */}
-                              <td className="py-3 px-4 text-center whitespace-nowrap">
+                              <td className="py-2 sm:py-3 px-1.5 sm:px-4 text-center whitespace-nowrap">
                                 <button
                                   onClick={() => handlePeriodClick(student.id, activeTabDay, 'p2')}
-                                  className={`px-3.5 py-1.5 rounded-lg text-[11px] font-bold tracking-tight inline-block cursor-pointer transition focus:scale-95 whitespace-nowrap ${getStatusBadgeStyle(
+                                  className={`px-2 sm:px-3.5 py-1 sm:py-1.5 rounded-md sm:rounded-lg text-[10px] sm:text-[11px] font-bold tracking-tight inline-block cursor-pointer transition focus:scale-95 whitespace-nowrap ${getStatusBadgeStyle(
                                     student.attendance[activeTabDay]?.p2 || '미확인'
                                   )}`}
                                 >
@@ -1070,10 +1072,10 @@ export default function App() {
 
                               {/* [요구사항 7] 수요일 3교시 출석 상태 블록 */}
                               {activeTabDay === '수' && (
-                                <td className="py-3 px-4 text-center whitespace-nowrap">
+                                <td className="py-2 sm:py-3 px-1.5 sm:px-4 text-center whitespace-nowrap">
                                   <button
                                     onClick={() => handlePeriodClick(student.id, '수', 'p3')}
-                                    className={`px-3.5 py-1.5 rounded-lg text-[11px] font-bold tracking-tight inline-block cursor-pointer transition focus:scale-95 whitespace-nowrap ${getStatusBadgeStyle(
+                                    className={`px-2 sm:px-3.5 py-1 sm:py-1.5 rounded-md sm:rounded-lg text-[10px] sm:text-[11px] font-bold tracking-tight inline-block cursor-pointer transition focus:scale-95 whitespace-nowrap ${getStatusBadgeStyle(
                                       student.attendance['수']?.p3 || '미확인'
                                     )}`}
                                   >
@@ -1083,21 +1085,21 @@ export default function App() {
                               )}
 
                               {/* 연계 관리 제어 설정 */}
-                              <td className="py-3 px-6 text-right whitespace-nowrap">
-                                <div className="flex items-center justify-end space-x-1.5">
+                              <td className="py-2 sm:py-3 px-2 sm:px-6 text-right whitespace-nowrap">
+                                <div className="flex items-center justify-end space-x-1 sm:space-x-1.5">
                                   <button
                                     onClick={() => openStudentDetail(student)}
-                                    className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded hover:text-white transition cursor-pointer"
+                                    className="p-1 sm:p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded hover:text-white transition cursor-pointer"
                                     title="상세 일치 연혁"
                                   >
-                                    <Info className="w-3.5 h-3.5" />
+                                    <Info className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                                   </button>
                                   <button
                                     onClick={() => handleDeleteStudent(student.id, student.name)}
-                                    className="p-1.5 bg-red-950/45 hover:bg-red-950 text-red-400 rounded transition cursor-pointer"
+                                    className="p-1 sm:p-1.5 bg-red-950/45 hover:bg-red-950 border border-red-900/30 text-red-400 rounded transition cursor-pointer"
                                     title="영구 삭제 제명"
                                   >
-                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <Trash2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                                   </button>
                                 </div>
                               </td>
