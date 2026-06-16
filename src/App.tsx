@@ -113,7 +113,7 @@ export default function App() {
     const getFormatted = (offset: number) => {
       const d = new Date(baseDate);
       d.setDate(baseDate.getDate() + offset);
-      const year = d.getFullYear();
+      const year = String(d.getFullYear()).slice(-2);
       const month = String(d.getMonth() + 1).padStart(2, '0');
       const day = String(d.getDate()).padStart(2, '0');
       return `${year}.${month}.${day}`;
@@ -904,14 +904,14 @@ export default function App() {
                 </div>
 
                 {/* 막대 바 제어 버튼 그룹 */}
-                <div className="bg-zinc-900/80 p-1 rounded-xl border border-zinc-850 flex flex-wrap gap-1">
+                <div className="bg-zinc-900/80 p-0.5 sm:p-1 rounded-xl border border-zinc-850 grid grid-cols-6 gap-0.5 sm:gap-1">
                   {(['전체', '3-1', '3-2', '3-3', '3-4', '셀터디'] as const).map((room) => {
                     const isSelected = selectedClassroom === room;
                     return (
                       <button
                         key={room}
                         onClick={() => setSelectedClassroom(room)}
-                        className={`flex-1 min-w-[60px] py-2 px-3 text-xs font-bold rounded-lg transition-all text-center cursor-pointer ${
+                        className={`py-1.5 sm:py-2 px-0.5 sm:px-3 text-[10.5px] sm:text-xs font-bold rounded-lg transition-all text-center cursor-pointer ${
                           isSelected
                             ? 'bg-[var(--color-point-yellow)] text-black shadow-md'
                             : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
@@ -979,15 +979,15 @@ export default function App() {
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="bg-[#262626]/40 border-b border-zinc-800 text-[11px] font-bold text-zinc-400 leading-none">
-                        <th className="py-4 px-6">배정 자습실</th>
-                        <th className="py-4 px-4">학번</th>
-                        <th className="py-4 px-4">이름</th>
-                        <th className="py-4 px-4 text-center">1교시</th>
-                        <th className="py-4 px-4 text-center">2교시</th>
+                        <th className="py-4 px-6 whitespace-nowrap">배정 자습실</th>
+                        <th className="py-4 px-4 whitespace-nowrap">학번</th>
+                        <th className="py-4 px-4 whitespace-nowrap">이름</th>
+                        <th className="py-4 px-4 text-center whitespace-nowrap">1교시</th>
+                        <th className="py-4 px-4 text-center whitespace-nowrap">2교시</th>
                         {activeTabDay === '수' && (
-                          <th className="py-4 px-4 text-center">3교시</th>
+                          <th className="py-4 px-4 text-center whitespace-nowrap">3교시</th>
                         )}
-                        <th className="py-4 px-6 text-right">관리 제어</th>
+                        <th className="py-4 px-6 text-right whitespace-nowrap">관리 제어</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-800 text-xs">
@@ -1030,25 +1030,25 @@ export default function App() {
                               </td>
 
                               {/* 학번 (구 성별 컬럼 완전 삭제 처리) */}
-                              <td className="py-3 px-4 font-mono font-semibold text-zinc-400">
+                              <td className="py-3 px-4 font-mono font-semibold text-zinc-400 whitespace-nowrap">
                                 {student.studentId}
                               </td>
 
                               {/* 이름 (클릭 세부 연혁 표출 트리거) */}
-                              <td className="py-3 px-4">
+                              <td className="py-3 px-4 whitespace-nowrap">
                                 <button
                                   onClick={() => openStudentDetail(student)}
-                                  className="font-bold text-white hover:text-[var(--color-point-yellow)] transition hover:underline cursor-pointer text-left focus:outline-none"
+                                  className="font-bold text-white hover:text-[var(--color-point-yellow)] transition hover:underline cursor-pointer text-left focus:outline-none whitespace-nowrap inline-block"
                                 >
                                   {student.name}
                                 </button>
                               </td>
 
                               {/* 1교시 출석 상태 블록 */}
-                              <td className="py-3 px-4 text-center">
+                              <td className="py-3 px-4 text-center whitespace-nowrap">
                                 <button
                                   onClick={() => handlePeriodClick(student.id, activeTabDay, 'p1')}
-                                  className={`px-3.5 py-1.5 rounded-lg text-[11px] font-bold tracking-tight inline-block cursor-pointer transition focus:scale-95 ${getStatusBadgeStyle(
+                                  className={`px-3.5 py-1.5 rounded-lg text-[11px] font-bold tracking-tight inline-block cursor-pointer transition focus:scale-95 whitespace-nowrap ${getStatusBadgeStyle(
                                     student.attendance[activeTabDay]?.p1 || '미확인'
                                   )}`}
                                 >
@@ -1057,10 +1057,10 @@ export default function App() {
                               </td>
 
                               {/* 2교시 출석 상태 블록 */}
-                              <td className="py-3 px-4 text-center">
+                              <td className="py-3 px-4 text-center whitespace-nowrap">
                                 <button
                                   onClick={() => handlePeriodClick(student.id, activeTabDay, 'p2')}
-                                  className={`px-3.5 py-1.5 rounded-lg text-[11px] font-bold tracking-tight inline-block cursor-pointer transition focus:scale-95 ${getStatusBadgeStyle(
+                                  className={`px-3.5 py-1.5 rounded-lg text-[11px] font-bold tracking-tight inline-block cursor-pointer transition focus:scale-95 whitespace-nowrap ${getStatusBadgeStyle(
                                     student.attendance[activeTabDay]?.p2 || '미확인'
                                   )}`}
                                 >
@@ -1070,10 +1070,10 @@ export default function App() {
 
                               {/* [요구사항 7] 수요일 3교시 출석 상태 블록 */}
                               {activeTabDay === '수' && (
-                                <td className="py-3 px-4 text-center">
+                                <td className="py-3 px-4 text-center whitespace-nowrap">
                                   <button
                                     onClick={() => handlePeriodClick(student.id, '수', 'p3')}
-                                    className={`px-3.5 py-1.5 rounded-lg text-[11px] font-bold tracking-tight inline-block cursor-pointer transition focus:scale-95 ${getStatusBadgeStyle(
+                                    className={`px-3.5 py-1.5 rounded-lg text-[11px] font-bold tracking-tight inline-block cursor-pointer transition focus:scale-95 whitespace-nowrap ${getStatusBadgeStyle(
                                       student.attendance['수']?.p3 || '미확인'
                                     )}`}
                                   >
