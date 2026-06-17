@@ -24,35 +24,18 @@ import {
 } from 'lucide-react';
 import { DayOfWeek, AttendanceStatus, Student, Classroom, PeriodAttendance, AttendanceHistoryItem } from './types';
 import { INITIAL_STUDENTS, createDefaultAttendance } from './data';
+import { loadStudentsFromFirebase, saveAllStudentsToFirebase } from './lib/firebase';
 
 export default function App() {
   // --- 상태 관리 (Local Storage 동기화 포함) ---
+  const [studentsLoaded, setStudentsLoaded] = useState(false);
+  const [isFirebaseSyncing, setIsFirebaseSyncing] = useState(false);
   const [students, setStudents] = useState<Student[]>(() => {
     const saved = localStorage.getItem('self_study_attendance_students_v2');
     if (saved) {
       try {
         const parsed = JSON.parse(saved) as Student[];
-        let mutated = false;
-        const migrated = parsed.map(s => {
-          const days: DayOfWeek[] = ['월', '화', '수', '목', '금'];
-          const newAttendance = { ...s.attendance };
-          days.forEach(d => {
-            const periods = d === '수' ? ['p1', 'p2', 'p3'] : ['p1', 'p2'];
-            periods.forEach(p => {
-              // @ts-ignore
-              if (newAttendance[d]?.[p] === '출석') {
-                // @ts-ignore
-                newAttendance[d][p] = '미확인';
-                mutated = true;
-              }
-            });
-          });
-          return { ...s, attendance: newAttendance };
-        });
-        if (mutated) {
-          localStorage.setItem('self_study_attendance_students_v2', JSON.stringify(migrated));
-        }
-        return migrated;
+        return parsed;
       } catch (e) {
         console.error('로컬스토리지 데이터를 파싱하는 중 오류:', e);
       }
@@ -60,9 +43,36 @@ export default function App() {
     return INITIAL_STUDENTS;
   });
 
+  // --- Firebase DB 실시간 데이터 동기화 가져오기 ---
+  useEffect(() => {
+    const initializeFirebaseData = async () => {
+      try {
+        const remoteStudents = await loadStudentsFromFirebase(INITIAL_STUDENTS);
+        if (remoteStudents && remoteStudents.length > 0) {
+          setStudents(remoteStudents);
+          localStorage.setItem('self_study_attendance_students_v2', JSON.stringify(remoteStudents));
+        }
+      } catch (err) {
+        console.error('Firebase 데이터를 가져오는 중 실패:', err);
+        showToast('서버 데이터 연결 실패: 로컬 복제본으로 구동합니다.', 'error');
+      } finally {
+        setStudentsLoaded(true);
+      }
+    };
+    initializeFirebaseData();
+  }, []);
+
   // 복구/정렬/필터 상태
   const [currentMenu, setCurrentMenu] = useState<'attendance_chart' | 'stats' | 'admin_settings'>('attendance_chart');
-  const [activeTabDay, setActiveTabDay] = useState<DayOfWeek>('월'); // 현재 출석부 선택 요일 (월, 화, 수, 목, 금)
+  const [activeTabDay, setActiveTabDay] = useState<DayOfWeek>(() => {
+    const days: string[] = ['일', '월', '화', '수', '목', '금', '토'];
+    const currentDayIndex = new Date().getDay(); // 0: 일요일, 1: 월요일, ...
+    const day = days[currentDayIndex];
+    if (day === '월' || day === '화' || day === '수' || day === '목' || day === '금') {
+      return day as DayOfWeek;
+    }
+    return '월'; // 주말(토, 일)에는 기본으로 '월' 선택
+  }); // 현재 출석부 선택 요일 (월, 화, 수, 목, 금)
   const [selectedClassroom, setSelectedClassroom] = useState<Classroom | '전체'>('전체'); // 자습 교실 필터
   const [searchQuery, setSearchQuery] = useState<string>(''); // 검색 키워드
   const [warningOnlyFilter, setWarningOnlyFilter] = useState<boolean>(false); // 경고 대상 학생만 보기
@@ -166,10 +176,28 @@ export default function App() {
     return () => clearInterval(monitorTimer);
   }, []);
 
-  // 데이터 보존
+  // 데이터 클라우드/로컬 이중 보존 및 실시간 동기화
   useEffect(() => {
+    if (!studentsLoaded) return;
+
+    // 로컬 스토리지 선반 보존 (오프라인 지원 및 초고속 렌더링)
     localStorage.setItem('self_study_attendance_students_v2', JSON.stringify(students));
-  }, [students]);
+
+    // Firebase 원격지 저장 (디바운싱 래퍼 적용으로 과도한 API 콜 차단)
+    setIsFirebaseSyncing(true);
+    const saveTimer = setTimeout(() => {
+      saveAllStudentsToFirebase(students)
+        .then(() => {
+          setIsFirebaseSyncing(false);
+        })
+        .catch(err => {
+          console.error('Firebase 업로드 오류:', err);
+          setIsFirebaseSyncing(false);
+        });
+    }, 600); // 600ms 동안 추가 입력이 없을 때 일괄 복제 저장
+
+    return () => clearTimeout(saveTimer);
+  }, [students, studentsLoaded]);
 
   // --- 상태 순환 변경 리스트 도우미 (요구사항 6) ---
   const statusCycle: AttendanceStatus[] = ['출석', '수업', '병결', '개인사', '미참여일', '미인정결', '미확인'];
@@ -748,9 +776,19 @@ export default function App() {
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
               <div className="flex items-center space-x-2">
-                <span className="px-2 py-0.5 rounded bg-[rgba(255,215,0,0.12)] text-[10px] font-mono text-[var(--color-point-yellow)] border border-[rgba(255,215,0,0.2)] font-semibold tracking-wider">
-                  OFFLINE WORKSPACE
-                </span>
+                {!studentsLoaded ? (
+                  <span className="px-2 py-0.5 rounded bg-amber-500/10 text-[10px] font-mono text-amber-500 border border-amber-500/20 font-semibold tracking-wider animate-pulse">
+                    ◌ CLOUD CONNECTING...
+                  </span>
+                ) : isFirebaseSyncing ? (
+                  <span className="px-2 py-0.5 rounded bg-[rgba(14,165,233,0.12)] text-[10px] font-mono text-sky-400 border border-[rgba(14,165,233,0.2)] font-semibold tracking-wider animate-pulse">
+                    ◌ CLOUD SYNCING...
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded bg-[rgba(16,185,129,0.12)] text-[10px] font-mono text-emerald-400 border border-[rgba(16,185,129,0.2)] font-semibold tracking-wider">
+                    ● CLOUD SYNCED
+                  </span>
+                )}
                 <span className="text-[11px] text-zinc-500 font-medium">| 2026학년도 3학년 대입 집중 자율학습</span>
               </div>
               <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-white mt-1.5">
