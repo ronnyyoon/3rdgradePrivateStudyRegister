@@ -604,6 +604,27 @@ export default function App() {
     }
   };
 
+  // 관리자 설정 - 기본값 설정 리스트용 셀렉트 박스 전용 스타일
+  const getSelectStyle = (status: AttendanceStatus) => {
+    switch (status) {
+      case '출석':
+        return 'bg-[rgba(255,215,0,0.12)] text-[var(--color-point-yellow)] border-[rgba(255,215,0,0.35)] font-bold';
+      case '수업':
+        return 'bg-blue-500/15 text-blue-400 border-blue-500/30 font-bold';
+      case '병결':
+        return 'bg-orange-500/15 text-orange-400 border-orange-500/30 font-bold';
+      case '개인사':
+        return 'bg-purple-500/15 text-purple-400 border-purple-500/30 font-bold';
+      case '미참여일':
+        return 'bg-zinc-800/70 text-zinc-400 border-zinc-700/60 font-medium';
+      case '미인정결':
+        return 'bg-rose-500/12 text-rose-400 border-rose-500/35 font-bold';
+      case '미확인':
+      default:
+        return 'bg-zinc-900 text-zinc-500 border-zinc-800/80 font-normal';
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#121212] text-[#f3f4f6] flex w-full font-sans antialiased" id="app-container">
       
@@ -1387,16 +1408,16 @@ export default function App() {
                       <tr className="bg-[#262626]/40 border-b border-zinc-800 text-[11px] font-bold text-zinc-400 leading-none">
                         <th className="py-4 px-4 sticky left-0 bg-[#1E1E1E] z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)]">자습실</th>
                         <th className="py-4 px-4 sticky left-[70px] bg-[#1E1E1E] z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)]">학번</th>
-                        <th className="py-4 px-4 sticky left-[130px] bg-[#1E1E1E] z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)]">이름</th>
+                        <th className="py-4 px-4 sticky left-[130px] bg-[#1E1E1E] z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)] border-r-2 border-zinc-700/80">이름</th>
                         <th className="py-4 px-2 text-center text-zinc-300">월1</th>
-                        <th className="py-4 px-2 text-center text-zinc-300">월2</th>
+                        <th className="py-4 px-2 text-center text-zinc-300 border-r-2 border-zinc-700/80">월2</th>
                         <th className="py-4 px-2 text-center text-zinc-300">화1</th>
-                        <th className="py-4 px-2 text-center text-zinc-300">화2</th>
-                        <th className="py-4 px-2 text-center text-amber-300">수1</th>
-                        <th className="py-4 px-2 text-center text-amber-300">수2</th>
-                        <th className="py-4 px-2 text-center text-amber-300">수3</th>
+                        <th className="py-4 px-2 text-center text-zinc-300 border-r-2 border-zinc-700/80">화2</th>
+                        <th className="py-4 px-2 text-center text-amber-300 bg-amber-950/10">수1</th>
+                        <th className="py-4 px-2 text-center text-amber-300 bg-amber-950/10">수2</th>
+                        <th className="py-4 px-2 text-center text-amber-300 bg-amber-950/10 border-r-2 border-zinc-700/80">수3</th>
                         <th className="py-4 px-2 text-center text-zinc-300">목1</th>
-                        <th className="py-4 px-2 text-center text-zinc-300">목2</th>
+                        <th className="py-4 px-2 text-center text-zinc-300 border-r-2 border-zinc-700/80">목2</th>
                         <th className="py-4 px-2 text-center text-zinc-300">금1</th>
                         <th className="py-4 px-2 text-center text-zinc-300">금2</th>
                       </tr>
@@ -1413,12 +1434,12 @@ export default function App() {
                               </span>
                             </td>
                             <td className="py-3 px-4 sticky left-[70px] bg-[#1E1E1E]/95 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)] text-zinc-400 font-semibold">{student.studentId}</td>
-                            <td className="py-3 px-4 sticky left-[130px] bg-[#1E1E1E]/95 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)] font-bold text-white whitespace-nowrap">{student.name}</td>
+                            <td className="py-3 px-4 sticky left-[130px] bg-[#1E1E1E]/95 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)] font-bold text-white whitespace-nowrap border-r-2 border-zinc-700/80">{student.name}</td>
                             
                             {/* 월요일 */}
                             <td className="py-3 px-1 text-center">
                               <select
-                                className="bg-[#262626] text-[10px] text-white px-1.5 py-1 rounded border border-zinc-700/60 focus:outline-none focus:border-[var(--color-point-yellow)] w-[68px]"
+                                className={`text-[10px] px-1.5 py-1 rounded border focus:outline-none focus:border-amber-400 w-[68px] transition transition-all ${getSelectStyle(currentFixed['월']?.p1 || '미확인')}`}
                                 value={currentFixed['월']?.p1 || '미확인'}
                                 onChange={(e) => {
                                   handleFixedSettingChange(student.id, '월', 'p1', e.target.value as AttendanceStatus);
@@ -1426,13 +1447,13 @@ export default function App() {
                                 }}
                               >
                                 {statusCycle.map((s) => (
-                                  <option key={s} value={s}>{s}</option>
+                                  <option key={s} value={s} className="bg-zinc-900 text-white font-medium">{s}</option>
                                 ))}
                               </select>
                             </td>
-                            <td className="py-3 px-1 text-center">
+                            <td className="py-3 px-1 text-center border-r-2 border-zinc-700/60">
                               <select
-                                className="bg-[#262626] text-[10px] text-white px-1.5 py-1 rounded border border-zinc-700/60 focus:outline-none focus:border-[var(--color-point-yellow)] w-[68px]"
+                                className={`text-[10px] px-1.5 py-1 rounded border focus:outline-none focus:border-amber-400 w-[68px] transition transition-all ${getSelectStyle(currentFixed['월']?.p2 || '미확인')}`}
                                 value={currentFixed['월']?.p2 || '미확인'}
                                 onChange={(e) => {
                                   handleFixedSettingChange(student.id, '월', 'p2', e.target.value as AttendanceStatus);
@@ -1440,7 +1461,7 @@ export default function App() {
                                 }}
                               >
                                 {statusCycle.map((s) => (
-                                  <option key={s} value={s}>{s}</option>
+                                  <option key={s} value={s} className="bg-zinc-900 text-white font-medium">{s}</option>
                                 ))}
                               </select>
                             </td>
@@ -1448,7 +1469,7 @@ export default function App() {
                             {/* 화요일 */}
                             <td className="py-3 px-1 text-center">
                               <select
-                                className="bg-[#262626] text-[10px] text-white px-1.5 py-1 rounded border border-zinc-700/60 focus:outline-none focus:border-[var(--color-point-yellow)] w-[68px]"
+                                className={`text-[10px] px-1.5 py-1 rounded border focus:outline-none focus:border-amber-400 w-[68px] transition transition-all ${getSelectStyle(currentFixed['화']?.p1 || '미확인')}`}
                                 value={currentFixed['화']?.p1 || '미확인'}
                                 onChange={(e) => {
                                   handleFixedSettingChange(student.id, '화', 'p1', e.target.value as AttendanceStatus);
@@ -1456,13 +1477,13 @@ export default function App() {
                                 }}
                               >
                                 {statusCycle.map((s) => (
-                                  <option key={s} value={s}>{s}</option>
+                                  <option key={s} value={s} className="bg-zinc-900 text-white font-medium">{s}</option>
                                 ))}
                               </select>
                             </td>
-                            <td className="py-3 px-1 text-center">
+                            <td className="py-3 px-1 text-center border-r-2 border-zinc-700/60">
                               <select
-                                className="bg-[#262626] text-[10px] text-white px-1.5 py-1 rounded border border-zinc-700/60 focus:outline-none focus:border-[var(--color-point-yellow)] w-[68px]"
+                                className={`text-[10px] px-1.5 py-1 rounded border focus:outline-none focus:border-amber-400 w-[68px] transition transition-all ${getSelectStyle(currentFixed['화']?.p2 || '미확인')}`}
                                 value={currentFixed['화']?.p2 || '미확인'}
                                 onChange={(e) => {
                                   handleFixedSettingChange(student.id, '화', 'p2', e.target.value as AttendanceStatus);
@@ -1470,7 +1491,7 @@ export default function App() {
                                 }}
                               >
                                 {statusCycle.map((s) => (
-                                  <option key={s} value={s}>{s}</option>
+                                  <option key={s} value={s} className="bg-zinc-900 text-white font-medium">{s}</option>
                                 ))}
                               </select>
                             </td>
@@ -1478,7 +1499,7 @@ export default function App() {
                             {/* 수요일 */}
                             <td className="py-3 px-1 text-center bg-zinc-900/30">
                               <select
-                                className="bg-[#262626] text-[10px] text-white px-1.5 py-1 rounded border border-amber-900/40 focus:outline-none focus:border-[var(--color-point-yellow)] w-[68px]"
+                                className={`text-[10px] px-1.5 py-1 rounded border focus:outline-none focus:border-amber-400 w-[68px] transition transition-all ${getSelectStyle(currentFixed['수']?.p1 || '미확인')}`}
                                 value={currentFixed['수']?.p1 || '미확인'}
                                 onChange={(e) => {
                                   handleFixedSettingChange(student.id, '수', 'p1', e.target.value as AttendanceStatus);
@@ -1486,13 +1507,13 @@ export default function App() {
                                 }}
                               >
                                 {statusCycle.map((s) => (
-                                  <option key={s} value={s}>{s}</option>
+                                  <option key={s} value={s} className="bg-zinc-900 text-white font-medium">{s}</option>
                                 ))}
                               </select>
                             </td>
                             <td className="py-3 px-1 text-center bg-zinc-900/30">
                               <select
-                                className="bg-[#262626] text-[10px] text-white px-1.5 py-1 rounded border border-amber-900/40 focus:outline-none focus:border-[var(--color-point-yellow)] w-[68px]"
+                                className={`text-[10px] px-1.5 py-1 rounded border focus:outline-none focus:border-amber-400 w-[68px] transition transition-all ${getSelectStyle(currentFixed['수']?.p2 || '미확인')}`}
                                 value={currentFixed['수']?.p2 || '미확인'}
                                 onChange={(e) => {
                                   handleFixedSettingChange(student.id, '수', 'p2', e.target.value as AttendanceStatus);
@@ -1500,13 +1521,13 @@ export default function App() {
                                 }}
                               >
                                 {statusCycle.map((s) => (
-                                  <option key={s} value={s}>{s}</option>
+                                  <option key={s} value={s} className="bg-zinc-900 text-white font-medium">{s}</option>
                                 ))}
                               </select>
                             </td>
-                            <td className="py-3 px-1 text-center bg-zinc-900/30">
+                            <td className="py-3 px-1 text-center bg-zinc-900/30 border-r-2 border-zinc-700/60">
                               <select
-                                className="bg-[#262626] text-[10px] text-white px-1.5 py-1 rounded border border-amber-900/40 focus:outline-none focus:border-[var(--color-point-yellow)] w-[68px]"
+                                className={`text-[10px] px-1.5 py-1 rounded border focus:outline-none focus:border-amber-400 w-[68px] transition transition-all ${getSelectStyle(currentFixed['수']?.p3 || '미확인')}`}
                                 value={currentFixed['수']?.p3 || '미확인'}
                                 onChange={(e) => {
                                   handleFixedSettingChange(student.id, '수', 'p3', e.target.value as AttendanceStatus);
@@ -1514,7 +1535,7 @@ export default function App() {
                                 }}
                               >
                                 {statusCycle.map((s) => (
-                                  <option key={s} value={s}>{s}</option>
+                                  <option key={s} value={s} className="bg-zinc-900 text-white font-medium">{s}</option>
                                 ))}
                               </select>
                             </td>
@@ -1522,7 +1543,7 @@ export default function App() {
                             {/* 목요일 */}
                             <td className="py-3 px-1 text-center">
                               <select
-                                className="bg-[#262626] text-[10px] text-white px-1.5 py-1 rounded border border-zinc-700/60 focus:outline-none focus:border-[var(--color-point-yellow)] w-[68px]"
+                                className={`text-[10px] px-1.5 py-1 rounded border focus:outline-none focus:border-amber-400 w-[68px] transition transition-all ${getSelectStyle(currentFixed['목']?.p1 || '미확인')}`}
                                 value={currentFixed['목']?.p1 || '미확인'}
                                 onChange={(e) => {
                                   handleFixedSettingChange(student.id, '목', 'p1', e.target.value as AttendanceStatus);
@@ -1530,13 +1551,13 @@ export default function App() {
                                 }}
                               >
                                 {statusCycle.map((s) => (
-                                  <option key={s} value={s}>{s}</option>
+                                  <option key={s} value={s} className="bg-zinc-900 text-white font-medium">{s}</option>
                                 ))}
                               </select>
                             </td>
-                            <td className="py-3 px-1 text-center">
+                            <td className="py-3 px-1 text-center border-r-2 border-zinc-700/60">
                               <select
-                                className="bg-[#262626] text-[10px] text-white px-1.5 py-1 rounded border border-zinc-700/60 focus:outline-none focus:border-[var(--color-point-yellow)] w-[68px]"
+                                className={`text-[10px] px-1.5 py-1 rounded border focus:outline-none focus:border-amber-400 w-[68px] transition transition-all ${getSelectStyle(currentFixed['목']?.p2 || '미확인')}`}
                                 value={currentFixed['목']?.p2 || '미확인'}
                                 onChange={(e) => {
                                   handleFixedSettingChange(student.id, '목', 'p2', e.target.value as AttendanceStatus);
@@ -1544,7 +1565,7 @@ export default function App() {
                                 }}
                               >
                                 {statusCycle.map((s) => (
-                                  <option key={s} value={s}>{s}</option>
+                                  <option key={s} value={s} className="bg-zinc-900 text-white font-medium">{s}</option>
                                 ))}
                               </select>
                             </td>
@@ -1552,7 +1573,7 @@ export default function App() {
                             {/* 금요일 */}
                             <td className="py-3 px-1 text-center">
                               <select
-                                className="bg-[#262626] text-[10px] text-white px-1.5 py-1 rounded border border-zinc-700/60 focus:outline-none focus:border-[var(--color-point-yellow)] w-[68px]"
+                                className={`text-[10px] px-1.5 py-1 rounded border focus:outline-none focus:border-amber-400 w-[68px] transition transition-all ${getSelectStyle(currentFixed['금']?.p1 || '미확인')}`}
                                 value={currentFixed['금']?.p1 || '미확인'}
                                 onChange={(e) => {
                                   handleFixedSettingChange(student.id, '금', 'p1', e.target.value as AttendanceStatus);
@@ -1560,13 +1581,13 @@ export default function App() {
                                 }}
                               >
                                 {statusCycle.map((s) => (
-                                  <option key={s} value={s}>{s}</option>
+                                  <option key={s} value={s} className="bg-zinc-900 text-white font-medium">{s}</option>
                                 ))}
                               </select>
                             </td>
                             <td className="py-3 px-1 text-center">
                               <select
-                                className="bg-[#262626] text-[10px] text-white px-1.5 py-1 rounded border border-zinc-700/60 focus:outline-none focus:border-[var(--color-point-yellow)] w-[68px]"
+                                className={`text-[10px] px-1.5 py-1 rounded border focus:outline-none focus:border-amber-400 w-[68px] transition transition-all ${getSelectStyle(currentFixed['금']?.p2 || '미확인')}`}
                                 value={currentFixed['금']?.p2 || '미확인'}
                                 onChange={(e) => {
                                   handleFixedSettingChange(student.id, '금', 'p2', e.target.value as AttendanceStatus);
@@ -1574,7 +1595,7 @@ export default function App() {
                                 }}
                               >
                                 {statusCycle.map((s) => (
-                                  <option key={s} value={s}>{s}</option>
+                                  <option key={s} value={s} className="bg-zinc-900 text-white font-medium">{s}</option>
                                 ))}
                               </select>
                             </td>
