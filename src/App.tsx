@@ -26,12 +26,31 @@ import { DayOfWeek, AttendanceStatus, Student, Classroom, PeriodAttendance, Atte
 import { INITIAL_STUDENTS, createDefaultAttendance } from './data';
 import { loadStudentsFromFirebase, saveAllStudentsToFirebase } from './lib/firebase';
 
+// Safely wrap localStorage references to support iframe sandboxes and private browsing where localStorage might be blocked or throw SecurityError
+const safeLocalStorage = {
+  getItem: (key: string): string | null => {
+    try {
+      return localStorage.getItem(key);
+    } catch (e) {
+      console.warn('localStorage.getItem access denied or blocked:', e);
+      return null;
+    }
+  },
+  setItem: (key: string, value: string): void => {
+    try {
+      localStorage.setItem(key, value);
+    } catch (e) {
+      console.warn('localStorage.setItem access denied or blocked:', e);
+    }
+  }
+};
+
 export default function App() {
   // --- 상태 관리 (Local Storage 동기화 포함) ---
   const [studentsLoaded, setStudentsLoaded] = useState(false);
   const [isFirebaseSyncing, setIsFirebaseSyncing] = useState(false);
   const [students, setStudents] = useState<Student[]>(() => {
-    const saved = localStorage.getItem('self_study_attendance_students_v2');
+    const saved = safeLocalStorage.getItem('self_study_attendance_students_v2');
     if (saved) {
       try {
         const parsed = JSON.parse(saved) as Student[];
@@ -50,7 +69,7 @@ export default function App() {
         const remoteStudents = await loadStudentsFromFirebase(INITIAL_STUDENTS);
         if (remoteStudents && remoteStudents.length > 0) {
           setStudents(remoteStudents);
-          localStorage.setItem('self_study_attendance_students_v2', JSON.stringify(remoteStudents));
+          safeLocalStorage.setItem('self_study_attendance_students_v2', JSON.stringify(remoteStudents));
         }
       } catch (err) {
         console.error('Firebase 데이터를 가져오는 중 실패:', err);
@@ -113,16 +132,17 @@ export default function App() {
     notes: ''
   });
 
-  // 주차 일자 실시간 바인딩 (2026.06.16이 화요일인 이번 주 기준 계산)
+  // 주차 일자 실시간 바인딩 (현재 주 평일 날짜 동적 자동 계산)
   const dateMap = useMemo(() => {
-    // 2026년 6월 16일은 화요일이므로, 이번 주의 요일별 진짜 날짜를 뽑아낸다.
-    // 기준 시점: 2026년 6월 16일 (화요일)
-    const baseDate = new Date('2026-06-16T09:00:00'); 
-    const dayIndex = baseDate.getDay(); // 2일 (화요일)
+    const now = currentTime; // 1초마다 업데이트되는 currentTime을 기준시각으로 삼아 완벽히 실시간 연동
+    const currentDay = now.getDay(); // 0: 일요일, 1: 월요일, ...
+    const distToMonday = currentDay === 0 ? -6 : 1 - currentDay;
+    const mondayDate = new Date(now);
+    mondayDate.setDate(now.getDate() + distToMonday);
     
     const getFormatted = (offset: number) => {
-      const d = new Date(baseDate);
-      d.setDate(baseDate.getDate() + offset);
+      const d = new Date(mondayDate);
+      d.setDate(mondayDate.getDate() + offset);
       const year = String(d.getFullYear()).slice(-2);
       const month = String(d.getMonth() + 1).padStart(2, '0');
       const day = String(d.getDate()).padStart(2, '0');
@@ -130,16 +150,18 @@ export default function App() {
     };
 
     return {
-      '월': getFormatted(-1), // 2026.06.15
-      '화': getFormatted(0),  // 2026.06.16
-      '수': getFormatted(1),  // 2026.06.17
-      '목': getFormatted(2),  // 2026.06.18
-      '금': getFormatted(3),  // 2026.06.19
+      '월': getFormatted(0),
+      '화': getFormatted(1),
+      '수': getFormatted(2),
+      '목': getFormatted(3),
+      '금': getFormatted(4),
     };
-  }, []);
+  }, [currentTime]);
 
   // --- 요구사항 14: 월요일 오전 00:00 일괄 자동 초기화 로직 ---
   useEffect(() => {
+    if (!studentsLoaded) return; // 데이터 인스턴스가 완전히 셋업된 후 원장 리셋을 검증합니다!
+
     const checkResetWeekly = () => {
       // 한국 기준 이번주의 월요일 일자 계산
       const now = new Date();
@@ -149,24 +171,67 @@ export default function App() {
       mondayDate.setDate(now.getDate() + distToMonday);
       
       const monStr = `${mondayDate.getFullYear()}.${String(mondayDate.getMonth() + 1).padStart(2, '0')}.${String(mondayDate.getDate()).padStart(2, '0')}`;
-      const lastResetMonday = localStorage.getItem('self_study_weekly_reset_monday');
+      const lastResetMonday = safeLocalStorage.getItem('self_study_weekly_reset_monday');
       
+      // 처음 방문한 상황이면 오늘 속한 주 월요일 날짜만 기록하고 초기화하지 않음 (기존 데이터 보존)
+      if (!lastResetMonday) {
+        safeLocalStorage.setItem('self_study_weekly_reset_monday', monStr);
+        return;
+      }
+
       // 만약 등록된 마지막 리셋 월요일 날짜와 금주 월요일 날짜가 다르다면 일괄 리셋 진행!
       if (lastResetMonday !== monStr) {
         setStudents(prevStudents => {
-          const reseted = prevStudents.map(student => {
+          return prevStudents.map(student => {
+            // 지난주 자습 결과를 누적 이력(attendanceHistory)에 안전하게 아카이빙합니다 (기록 누적 보존)
+            const updatedHistory = [...(student.attendanceHistory || [])];
+            const days: DayOfWeek[] = ['월', '화', '수', '목', '금'];
+            
+            // 지난주 월요일 일자로 역산하여 요일별 정확한 연월일 문자열 구하기
+            const [ly, lm, ld] = lastResetMonday.split('.').map(Number);
+            const prevMonDate = new Date(ly, lm - 1, ld);
+            
+            const getPrevDateStr = (offset: number) => {
+              const targetD = new Date(prevMonDate);
+              targetD.setDate(prevMonDate.getDate() + offset);
+              return `${targetD.getFullYear()}.${String(targetD.getMonth() + 1).padStart(2, '0')}.${String(targetD.getDate()).padStart(2, '0')}`;
+            };
+            
+            const dayOffsetMap: Record<DayOfWeek, number> = { '월': 0, '화': 1, '수': 2, '목': 3, '금': 4 };
+            
+            days.forEach((d) => {
+              const dayDateStr = getPrevDateStr(dayOffsetMap[d]);
+              const periods: ('p1' | 'p2' | 'p3')[] = d === '수' ? ['p1', 'p2', 'p3'] : ['p1', 'p2'];
+              
+              periods.forEach((p) => {
+                const status = student.attendance[d][p];
+                // '미확인'이 아닌 기록된 출석 상태가 있다면 누적 기록에 추가
+                if (status && status !== '미확인') {
+                  const periodKorean = p === 'p1' ? '1교시' : p === 'p2' ? '2교시' : '3교시';
+                  const exists = updatedHistory.some(h => h.date === dayDateStr && h.period === periodKorean);
+                  if (!exists) {
+                    updatedHistory.push({
+                      date: dayDateStr,
+                      day: d,
+                      period: periodKorean,
+                      status: status
+                    });
+                  }
+                }
+              });
+            });
+
             // 자신의 fixedSettings가 있으면 그것으로 복제 복원, 없으면 기본 출석값으로 리셋
             const targetSettings = student.fixedSettings || createDefaultAttendance();
-            // 지난주 자습 결과를 누적 이력(History)에 아카이빙 시켜서 세련도를 더 높일 수 있습니다.
             return {
               ...student,
-              attendance: JSON.parse(JSON.stringify(targetSettings))
+              attendance: JSON.parse(JSON.stringify(targetSettings)),
+              attendanceHistory: updatedHistory
             };
           });
-          showToast(`월요일 오전 00:00 초기화 감지: 금주(${monStr}) 표준 양식으로 자동 리셋되었습니다.`, 'info');
-          return reseted;
         });
-        localStorage.setItem('self_study_weekly_reset_monday', monStr);
+        showToast(`월요일 오전 00:00 초기화 감지: 지난주 평일 기록이 누적으로 안전 보존되었으며, 금주(${monStr}) 표준 양식으로 자동 리셋되었습니다.`, 'info');
+        safeLocalStorage.setItem('self_study_weekly_reset_monday', monStr);
       }
     };
 
@@ -174,14 +239,14 @@ export default function App() {
     // 1분마다 월요일 도달 여부 간접 스캔 및 감시
     const monitorTimer = setInterval(checkResetWeekly, 60000);
     return () => clearInterval(monitorTimer);
-  }, []);
+  }, [studentsLoaded]);
 
   // 데이터 클라우드/로컬 이중 보존 및 실시간 동기화
   useEffect(() => {
     if (!studentsLoaded) return;
 
     // 로컬 스토리지 선반 보존 (오프라인 지원 및 초고속 렌더링)
-    localStorage.setItem('self_study_attendance_students_v2', JSON.stringify(students));
+    safeLocalStorage.setItem('self_study_attendance_students_v2', JSON.stringify(students));
 
     // Firebase 원격지 저장 (디바운싱 래퍼 적용으로 과도한 API 콜 차단)
     setIsFirebaseSyncing(true);

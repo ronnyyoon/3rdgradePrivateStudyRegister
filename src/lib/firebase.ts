@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, doc, getDocs, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
+import { initializeFirestore, collection, doc, getDocs, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
 import { Student } from '../types';
 
 const firebaseConfig = {
@@ -16,10 +16,53 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore with custom databaseId
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId || 'default');
+// Initialize Firestore with custom databaseId and force long polling
+const dbId = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
+  ? firebaseConfig.firestoreDatabaseId
+  : undefined;
+
+export const db = dbId
+  ? initializeFirestore(app, { experimentalForceLongPolling: true }, dbId)
+  : initializeFirestore(app, { experimentalForceLongPolling: true });
 
 const COLLECTION_NAME = 'students';
+
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {},
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 /**
  * Firestore로부터 전체 학생 목록을 가져옵니다.
@@ -44,6 +87,7 @@ export async function loadStudentsFromFirebase(initialStudents: Student[]): Prom
     return students.sort((a, b) => a.studentId.localeCompare(b.studentId));
   } catch (error) {
     console.error('Firebase 로드 오류:', error);
+    handleFirestoreError(error, OperationType.LIST, COLLECTION_NAME);
     throw error;
   }
 }
@@ -62,6 +106,7 @@ export async function saveAllStudentsToFirebase(students: Student[]): Promise<vo
     console.log(`${students.length}명의 학생 데이터가 Firebase에 성공적으로 일괄 보존 저장되었습니다.`);
   } catch (error) {
     console.error('Firebase 일괄 저장 오류:', error);
+    handleFirestoreError(error, OperationType.WRITE, COLLECTION_NAME);
     throw error;
   }
 }
@@ -76,6 +121,7 @@ export async function updateStudentInFirebase(student: Student): Promise<void> {
     console.log(`[Firebase] 학생 수시 동기화 완료: ${student.name}`);
   } catch (error) {
     console.error(`Firebase 학생 업데이트 오류 (${student.name}):`, error);
+    handleFirestoreError(error, OperationType.WRITE, `${COLLECTION_NAME}/${student.id}`);
     throw error;
   }
 }

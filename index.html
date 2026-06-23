@@ -21,6 +21,37 @@
     <meta name="twitter:title" content="2026학년도 3학년실 자율학습 출석부" />
     <meta name="twitter:description" content="쉽고 빠른 자율학습 출석 체크 및 통계 관리 시스템. 모바일/태블릿 터치 지원 대시보드." />
     <meta name="twitter:image" content="https://images.unsplash.com/photo-1434030216411-0b793f4b4173?auto=format&fit=crop&w=1200&q=80" />
+    
+    <!-- Early global error handler to safely suppress CORS/sandbox-related false positive errors -->
+    <script>
+      (function() {
+        var suppressErrors = ['Script error.', 'Script error', 'QuotaExceededError', 'SecurityError', 'IndexedDB'];
+        window.addEventListener('error', function(event) {
+          var msg = event.message || '';
+          var errorObj = event.error;
+          var shouldSuppress = suppressErrors.some(function(term) {
+            return msg.indexOf(term) !== -1 || (errorObj && errorObj.name && errorObj.name.indexOf(term) !== -1);
+          });
+          if (shouldSuppress || !msg) {
+            console.warn('[Sandbox Guard] Suppressed cross-origin / storage exception:', msg, errorObj);
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }, true);
+        
+        window.addEventListener('unhandledrejection', function(event) {
+          var reasonStr = event.reason ? String(event.reason) : '';
+          var shouldSuppress = suppressErrors.some(function(term) {
+            return reasonStr.indexOf(term) !== -1;
+          });
+          if (shouldSuppress) {
+            console.warn('[Sandbox Guard] Suppressed unhandled rejection:', reasonStr);
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }, true);
+      })();
+    </script>
   </head>
   <body class="bg-[#121212] text-white antialiased">
     <div id="root"></div>
