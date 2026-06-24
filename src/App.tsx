@@ -24,7 +24,14 @@ import {
 } from 'lucide-react';
 import { DayOfWeek, AttendanceStatus, Student, Classroom, PeriodAttendance, AttendanceHistoryItem } from './types';
 import { INITIAL_STUDENTS, createDefaultAttendance } from './data';
-import { loadStudentsFromFirebase, saveAllStudentsToFirebase } from './lib/firebase';
+import { 
+  loadStudentsFromFirebase, 
+  saveAllStudentsToFirebase,
+  getWeeklyResetMondayFromFirebase,
+  saveWeeklyResetMondayToFirebase,
+  getWeeklyWedThuFriResetMondayFromFirebase,
+  saveWeeklyWedThuFriResetMondayToFirebase
+} from './lib/firebase';
 
 // Safely wrap localStorage references to support iframe sandboxes and private browsing where localStorage might be blocked or throw SecurityError
 const safeLocalStorage = {
@@ -62,18 +69,124 @@ export default function App() {
     return INITIAL_STUDENTS;
   });
 
+  const [lastResetMonday, setLastResetMonday] = useState<string | null>(() => {
+    return safeLocalStorage.getItem('self_study_weekly_reset_monday');
+  });
+
+  const [lastWedThuFriResetMonday, setLastWedThuFriResetMonday] = useState<string | null>(() => {
+    return safeLocalStorage.getItem('self_study_weekly_wed_thu_fri_reset_monday');
+  });
+
   // --- Firebase DB 실시간 데이터 동기화 가져오기 ---
   useEffect(() => {
     const initializeFirebaseData = async () => {
       try {
-        const remoteStudents = await loadStudentsFromFirebase(INITIAL_STUDENTS);
+        const [remoteStudents, remoteResetMonday, remoteWedThuFriResetMonday] = await Promise.all([
+          loadStudentsFromFirebase(INITIAL_STUDENTS),
+          getWeeklyResetMondayFromFirebase(),
+          getWeeklyWedThuFriResetMondayFromFirebase()
+        ]);
+        
         if (remoteStudents && remoteStudents.length > 0) {
-          setStudents(remoteStudents);
-          safeLocalStorage.setItem('self_study_attendance_students_v2', JSON.stringify(remoteStudents));
+          // --- 셀프 힐링: 동기화 또는 리셋 누락으로 미래 요일에 남아진 예전 데이터 정리 ---
+          const now = new Date();
+          const currentDay = now.getDay(); // 0: 일요일, 1: 월요일, ..., 5: 금요일, 6: 토요일
+          
+          // 금주 월요일 날짜 구하기
+          const distToMonday = (currentDay === 0 ? -6 : 1 - currentDay);
+          const mondayDate = new Date(now);
+          mondayDate.setDate(now.getDate() + distToMonday);
+          const monStr = `${mondayDate.getFullYear()}.${String(mondayDate.getMonth() + 1).padStart(2, '0')}.${String(mondayDate.getDate()).padStart(2, '0')}`;
+
+          const activeWedThuFriReset = remoteWedThuFriResetMonday || safeLocalStorage.getItem('self_study_weekly_wed_thu_fri_reset_monday');
+          
+          let cleanedStudents = [...remoteStudents];
+          let didWedThuFriClean = false;
+          
+          // 오늘은 수요일(3), 목요일(4), 금요일(5)이고 이번 주에 수목금 리셋이 아직 수행되지 않았다면 리셋 진행
+          if ((currentDay === 3 || currentDay === 4 || currentDay === 5) && activeWedThuFriReset !== monStr) {
+            cleanedStudents = remoteStudents.map(student => {
+              const updatedAttendance = JSON.parse(JSON.stringify(student.attendance));
+              const targetSettings = student.fixedSettings || createDefaultAttendance();
+              
+              const daysToClean: DayOfWeek[] = ['수', '목', '금'];
+              daysToClean.forEach(d => {
+                const periods: ('p1' | 'p2' | 'p3')[] = d === '수' ? ['p1', 'p2', 'p3'] : ['p1', 'p2'];
+                periods.forEach(p => {
+                  updatedAttendance[d][p] = targetSettings[d][p];
+                });
+              });
+              
+              return { ...student, attendance: updatedAttendance };
+            });
+            didWedThuFriClean = true;
+          } else if (currentDay >= 1 && currentDay <= 4) {
+            // 기존의 보조 셀프 힐링 로직 (미래 요일 중 일부만 정리할 때)
+            const daysToClean: DayOfWeek[] = [];
+            if (currentDay < 3) daysToClean.push('수');
+            if (currentDay < 4) daysToClean.push('목');
+            if (currentDay < 5) daysToClean.push('금');
+            
+            cleanedStudents = remoteStudents.map(student => {
+              const updatedAttendance = JSON.parse(JSON.stringify(student.attendance));
+              const targetSettings = student.fixedSettings || createDefaultAttendance();
+              
+              let modified = false;
+              daysToClean.forEach(d => {
+                const periods: ('p1' | 'p2' | 'p3')[] = d === '수' ? ['p1', 'p2', 'p3'] : ['p1', 'p2'];
+                periods.forEach(p => {
+                  if (updatedAttendance[d][p] !== targetSettings[d][p]) {
+                    updatedAttendance[d][p] = targetSettings[d][p];
+                    modified = true;
+                  }
+                });
+              });
+              
+              return modified ? { ...student, attendance: updatedAttendance } : student;
+            });
+          }
+          
+          if (didWedThuFriClean) {
+            await saveAllStudentsToFirebase(cleanedStudents);
+            await saveWeeklyWedThuFriResetMondayToFirebase(monStr);
+            setLastWedThuFriResetMonday(monStr);
+            safeLocalStorage.setItem('self_study_weekly_wed_thu_fri_reset_monday', monStr);
+            showToast('수요일/목요일/금요일 자율학습 출석 현황을 금주 기준으로 리셋 완료했습니다.', 'success');
+          }
+          
+          setStudents(cleanedStudents);
+          safeLocalStorage.setItem('self_study_attendance_students_v2', JSON.stringify(cleanedStudents));
+        }
+        
+        if (remoteResetMonday) {
+          setLastResetMonday(remoteResetMonday);
+          safeLocalStorage.setItem('self_study_weekly_reset_monday', remoteResetMonday);
+        } else {
+          // Firebase에 리셋 날짜 정보가 존재하지 않는 경우, 로컬 체크 또는 현상태 등록
+          const localResetMonday = safeLocalStorage.getItem('self_study_weekly_reset_monday');
+          if (localResetMonday) {
+            setLastResetMonday(localResetMonday);
+            await saveWeeklyResetMondayToFirebase(localResetMonday);
+          }
+        }
+
+        if (remoteWedThuFriResetMonday) {
+          setLastWedThuFriResetMonday(remoteWedThuFriResetMonday);
+          safeLocalStorage.setItem('self_study_weekly_wed_thu_fri_reset_monday', remoteWedThuFriResetMonday);
         }
       } catch (err) {
         console.error('Firebase 데이터를 가져오는 중 실패:', err);
         showToast('서버 데이터 연결 실패: 로컬 복제본으로 구동합니다.', 'error');
+        
+        // 오류 발생 시 로컬 세이브 값을 대체 활용
+        const localResetMonday = safeLocalStorage.getItem('self_study_weekly_reset_monday');
+        if (localResetMonday) {
+          setLastResetMonday(localResetMonday);
+        }
+        const localWedThuFriReset = safeLocalStorage.getItem('self_study_weekly_wed_thu_fri_reset_monday');
+        if (localWedThuFriReset) {
+          setLastWedThuFriResetMonday(localWedThuFriReset);
+        }
       } finally {
         setStudentsLoaded(true);
       }
@@ -171,16 +284,38 @@ export default function App() {
       mondayDate.setDate(now.getDate() + distToMonday);
       
       const monStr = `${mondayDate.getFullYear()}.${String(mondayDate.getMonth() + 1).padStart(2, '0')}.${String(mondayDate.getDate()).padStart(2, '0')}`;
-      const lastResetMonday = safeLocalStorage.getItem('self_study_weekly_reset_monday');
-      
-      // 처음 방문한 상황이면 오늘 속한 주 월요일 날짜만 기록하고 초기화하지 않음 (기존 데이터 보존)
-      if (!lastResetMonday) {
-        safeLocalStorage.setItem('self_study_weekly_reset_monday', monStr);
-        return;
+      let currentLastReset = lastResetMonday;
+
+      if (!currentLastReset) {
+        // 혹시 기존 학생들의 데이터 중 실제 기등록 출석 체크 흔적이 남아있는지 확인 검증 (소급 초기화 목적)
+        const hasRecords = students.some(student => {
+          const days: DayOfWeek[] = ['월', '화', '수', '목', '금'];
+          return days.some(d => {
+            const periods = d === '수' ? ['p1', 'p2', 'p3'] : ['p1', 'p2'];
+            return periods.some(p => {
+              const status = student.attendance[d][p as keyof typeof student.attendance[DayOfWeek]];
+              return status && status !== '미확인';
+            });
+          });
+        });
+
+        if (hasRecords) {
+          // 기존 데이터가 있으므로 지난주 월요일 일자로 가상 역산 설정하여 소급 아카이빙 및 클린 세척을 유도합니다!
+          const prevMonday = new Date(mondayDate);
+          prevMonday.setDate(mondayDate.getDate() - 7);
+          const prevMonStr = `${prevMonday.getFullYear()}.${String(prevMonday.getMonth() + 1).padStart(2, '0')}.${String(prevMonday.getDate()).padStart(2, '0')}`;
+          currentLastReset = prevMonStr;
+        } else {
+          // 순수하게 신규 기동하여 내역이 완전히 깨끗한 상태인 경우, 금주 월요일을 초기 시점으로 안착 등록
+          setLastResetMonday(monStr);
+          safeLocalStorage.setItem('self_study_weekly_reset_monday', monStr);
+          saveWeeklyResetMondayToFirebase(monStr);
+          return;
+        }
       }
 
       // 만약 등록된 마지막 리셋 월요일 날짜와 금주 월요일 날짜가 다르다면 일괄 리셋 진행!
-      if (lastResetMonday !== monStr) {
+      if (currentLastReset !== monStr) {
         setStudents(prevStudents => {
           return prevStudents.map(student => {
             // 지난주 자습 결과를 누적 이력(attendanceHistory)에 안전하게 아카이빙합니다 (기록 누적 보존)
@@ -188,7 +323,7 @@ export default function App() {
             const days: DayOfWeek[] = ['월', '화', '수', '목', '금'];
             
             // 지난주 월요일 일자로 역산하여 요일별 정확한 연월일 문자열 구하기
-            const [ly, lm, ld] = lastResetMonday.split('.').map(Number);
+            const [ly, lm, ld] = currentLastReset!.split('.').map(Number);
             const prevMonDate = new Date(ly, lm - 1, ld);
             
             const getPrevDateStr = (offset: number) => {
@@ -223,15 +358,35 @@ export default function App() {
 
             // 자신의 fixedSettings가 있으면 그것으로 복제 복원, 없으면 기본 출석값으로 리셋
             const targetSettings = student.fixedSettings || createDefaultAttendance();
+            
+            // 만약 원래 리셋이 되어야 하는 시점(월요일 00:00)보다 늦게 리셋이 발동된 형태라면,
+            // (예: 화요일에 들어온 상황) 이미 새로 입력되었을 수 있는 월/화요일 등의 정보는 유지하고
+            // 아직 오지 않은 미래일(수/목/금)만 깨끗이 리셋해 줍니다.
+            const updatedAttendance = JSON.parse(JSON.stringify(student.attendance));
+            const dayToIndexMap: Record<DayOfWeek, number> = { '월': 1, '화': 2, '수': 3, '목': 4, '금': 5 };
+            
+            days.forEach((d) => {
+              const dayIndex = dayToIndexMap[d];
+              // 주말이거나 월요일이면 전면 초기화, 그 외의 요일이면 현재 요일보다 뒤에 있는 미래 요일들만 초기화
+              const shouldResetDay = (currentDay === 0 || currentDay === 6 || currentDay === 1) || (dayIndex > currentDay);
+              
+              if (shouldResetDay) {
+                updatedAttendance[d] = JSON.parse(JSON.stringify(targetSettings[d]));
+              }
+            });
+
             return {
               ...student,
-              attendance: JSON.parse(JSON.stringify(targetSettings)),
+              attendance: updatedAttendance,
               attendanceHistory: updatedHistory
             };
           });
         });
+        
         showToast(`월요일 오전 00:00 초기화 감지: 지난주 평일 기록이 누적으로 안전 보존되었으며, 금주(${monStr}) 표준 양식으로 자동 리셋되었습니다.`, 'info');
+        setLastResetMonday(monStr);
         safeLocalStorage.setItem('self_study_weekly_reset_monday', monStr);
+        saveWeeklyResetMondayToFirebase(monStr);
       }
     };
 
@@ -239,7 +394,7 @@ export default function App() {
     // 1분마다 월요일 도달 여부 간접 스캔 및 감시
     const monitorTimer = setInterval(checkResetWeekly, 60000);
     return () => clearInterval(monitorTimer);
-  }, [studentsLoaded]);
+  }, [studentsLoaded, lastResetMonday]);
 
   // 데이터 클라우드/로컬 이중 보존 및 실시간 동기화
   useEffect(() => {
@@ -465,7 +620,7 @@ export default function App() {
         if (val === '출석') {
           checkedPeriods++;
           presentPeriods++;
-        } else if (val === '병결' || val === '개인사' || val === '미인정결') {
+        } else if (val === '병결' || val === '개인사' || val === '미인정결' || val === '미확인') {
           checkedPeriods++;
         }
         // '수업', '미참여일' 은 체크 및 가산에서 제외됨 (분모 분자 둘 다 미포함)
@@ -474,9 +629,37 @@ export default function App() {
 
     // 과거 이력(attendanceHistory)에서의 출석건수와 변경건수도 누적 계산에 포함하면 보다 정교해집니다.
     if (student.attendanceHistory && student.attendanceHistory.length > 0) {
+      const normalizeDateStr = (dStr: string) => {
+        if (!dStr) return '';
+        const parts = dStr.split('.');
+        if (parts.length === 3) {
+          let year = parts[0];
+          if (year.length === 4) {
+            year = year.slice(-2);
+          }
+          const month = parts[1].padStart(2, '0');
+          const day = parts[2].padStart(2, '0');
+          return `${year}.${month}.${day}`;
+        }
+        return dStr;
+      };
+
+      const currentWeekDates = Object.values(dateMap).map(normalizeDateStr);
+
       student.attendanceHistory.forEach(h => {
-        // 이미 위에 이번 주에 계산한 날짜 범위를 넘어선 완전 과거 데이터가 쌓였다고 판단하는 보완 로직
-        // 단순히 계산을 정밀화하기 위해, 이번주 외의 누적 기록이 있다면 반영 가능하도록 아키텍처 지원
+        // 이번 주에 해당하는 날짜는 이미 위에서 계산했으므로 중복 계산 방지
+        const normDate = normalizeDateStr(h.date);
+        if (currentWeekDates.includes(normDate)) {
+          return;
+        }
+
+        const val = h.status;
+        if (val === '출석') {
+          checkedPeriods++;
+          presentPeriods++;
+        } else if (val === '병결' || val === '개인사' || val === '미인정결' || val === '미확인') {
+          checkedPeriods++;
+        }
       });
     }
 
@@ -484,19 +667,72 @@ export default function App() {
     return Math.round((presentPeriods / checkedPeriods) * 100);
   };
 
-  // 특정 요일 교시의 개별 출석률(%) 단일 계산기
+  // 특정 요일 교시의 개별 출석률(%) 단일 계산기 (당주 및 과거 이력 포함한 누적 산출)
   const getIndividualPeriodRate = (student: Student, day: DayOfWeek, period: 'p1' | 'p2' | 'p3') => {
+    const periodKorean = period === 'p1' ? '1교시' : period === 'p2' ? '2교시' : '3교시';
+    let checkedPeriodsCount = 0;
+    let presentPeriodsCount = 0;
+    let hasExclusionCurrentWeek = false;
+
+    const normalizeDateStr = (dStr: string) => {
+      if (!dStr) return '';
+      const parts = dStr.split('.');
+      if (parts.length === 3) {
+        let year = parts[0];
+        if (year.length === 4) {
+          year = year.slice(-2);
+        }
+        const month = parts[1].padStart(2, '0');
+        const day = parts[2].padStart(2, '0');
+        return `${year}.${month}.${day}`;
+      }
+      return dStr;
+    };
+
+    const currentWeekDateStr = normalizeDateStr(dateMap[day]);
+
+    // 1. 과거 이력 반영
+    if (student.attendanceHistory && student.attendanceHistory.length > 0) {
+      student.attendanceHistory.forEach(h => {
+        if (h.day === day && h.period === periodKorean) {
+          // 이번주 날짜와 중복되는 이력은 제외 (이번주 상태는 아래에서 직접 최신 반영)
+          if (normalizeDateStr(h.date) === currentWeekDateStr) {
+            return;
+          }
+
+          const val = h.status;
+          if (val === '출석') {
+            checkedPeriodsCount++;
+            presentPeriodsCount++;
+          } else if (val === '병결' || val === '개인사' || val === '미인정결' || val === '미확인') {
+            checkedPeriodsCount++;
+          }
+        }
+      });
+    }
+
+    // 2. 이번 주 최신 상태 직접 반영
     const status = student.attendance[day]?.[period];
-    if (!status) return '-';
-    
-    if (status === '수업' || status === '미참여일') {
+    if (status) {
+      if (status === '출석') {
+        checkedPeriodsCount++;
+        presentPeriodsCount++;
+      } else if (status === '병결' || status === '개인사' || status === '미인정결' || status === '미확인') {
+        checkedPeriodsCount++;
+      } else if (status === '수업' || status === '미참여일') {
+        hasExclusionCurrentWeek = true;
+      }
+    }
+
+    if (checkedPeriodsCount > 0) {
+      return `${Math.round((presentPeriodsCount / checkedPeriodsCount) * 100)}%`;
+    }
+
+    if (hasExclusionCurrentWeek) {
       return '제외';
     }
-    if (status === '출석') {
-      return '100%';
-    }
-    // 병결, 개인사는 감점 (출석안했으므로 0%)
-    return '0%';
+
+    return '-';
   };
 
   // --- 필터링 및 정렬된 결과 명단 (학번 정렬 필수) ---
@@ -1876,7 +2112,19 @@ export default function App() {
                         );
                       }
 
-                      return allHistory.sort((a,b)=>b.date.localeCompare(a.date)).map((hist, idx) => (
+                      const normalizeForSort = (dStr: string) => {
+                        if (!dStr) return '';
+                        const parts = dStr.split('.');
+                        if (parts.length === 3) {
+                          const year = parts[0].length === 2 ? '20' + parts[0] : parts[0];
+                          const month = parts[1].padStart(2, '0');
+                          const day = parts[2].padStart(2, '0');
+                          return `${year}.${month}.${day}`;
+                        }
+                        return dStr;
+                      };
+
+                      return allHistory.sort((a,b)=>normalizeForSort(b.date).localeCompare(normalizeForSort(a.date))).map((hist, idx) => (
                         <div key={idx} className="flex items-center justify-between text-[11px] bg-zinc-850 px-2.5 py-1.5 rounded-lg border border-zinc-800/80">
                           <span className="font-mono text-zinc-400">{hist.date} ({hist.day})</span>
                           <span className="font-semibold text-zinc-300">{hist.period}</span>

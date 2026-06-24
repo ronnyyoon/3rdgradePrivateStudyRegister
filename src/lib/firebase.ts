@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { initializeFirestore, collection, doc, getDocs, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
+import { initializeFirestore, collection, doc, getDocs, getDoc, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
 import { Student } from '../types';
 
 const firebaseConfig = {
@@ -123,5 +123,71 @@ export async function updateStudentInFirebase(student: Student): Promise<void> {
     console.error(`Firebase 학생 업데이트 오류 (${student.name}):`, error);
     handleFirestoreError(error, OperationType.WRITE, `${COLLECTION_NAME}/${student.id}`);
     throw error;
+  }
+}
+
+/**
+ * Firebase로부터 마지막 리셋 월요일 날짜를 읽어옵니다.
+ */
+export async function getWeeklyResetMondayFromFirebase(): Promise<string | null> {
+  try {
+    const docRef = doc(db, 'settings', 'weekly_reset');
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      return data.lastResetMonday || null;
+    }
+    return null;
+  } catch (error) {
+    console.error('Firebase 리셋 정보 로드 오류:', error);
+    handleFirestoreError(error, OperationType.GET, 'settings/weekly_reset');
+    return null;
+  }
+}
+
+/**
+ * Firebase에 마지막 리셋 월요일 날짜를 기록합니다.
+ */
+export async function saveWeeklyResetMondayToFirebase(monStr: string): Promise<void> {
+  try {
+    const docRef = doc(db, 'settings', 'weekly_reset');
+    await setDoc(docRef, { lastResetMonday: monStr }, { merge: true });
+    console.log('[Firebase] 주간 리셋 월요일 날짜가 성공적으로 저장되었습니다:', monStr);
+  } catch (error) {
+    console.error('Firebase 리셋 정보 저장 오류:', error);
+    handleFirestoreError(error, OperationType.WRITE, 'settings/weekly_reset');
+  }
+}
+
+/**
+ * Firebase로부터 수목금 리셋 월요일 날짜를 읽어옵니다.
+ */
+export async function getWeeklyWedThuFriResetMondayFromFirebase(): Promise<string | null> {
+  try {
+    const docRef = doc(db, 'settings', 'weekly_reset');
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      return data.lastWedThuFriResetMonday || null;
+    }
+    return null;
+  } catch (error) {
+    console.error('Firebase 수목금 리셋 정보 로드 오류:', error);
+    handleFirestoreError(error, OperationType.GET, 'settings/weekly_reset');
+    return null;
+  }
+}
+
+/**
+ * Firebase에 수목금 리셋 월요일 날짜를 기록합니다.
+ */
+export async function saveWeeklyWedThuFriResetMondayToFirebase(monStr: string): Promise<void> {
+  try {
+    const docRef = doc(db, 'settings', 'weekly_reset');
+    await setDoc(docRef, { lastWedThuFriResetMonday: monStr }, { merge: true });
+    console.log('[Firebase] 수목금 리셋 날짜 저장 완료:', monStr);
+  } catch (error) {
+    console.error('Firebase 수목금 리셋 정보 저장 오류:', error);
+    handleFirestoreError(error, OperationType.WRITE, 'settings/weekly_reset');
   }
 }
