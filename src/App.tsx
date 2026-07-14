@@ -511,17 +511,23 @@ export default function App() {
     const deletedMatched = students.find(s => s.studentId === addForm.studentId && s.name === addForm.name && s.isDeleted);
     if (deletedMatched) {
       // 연동 복구
-      setStudents(prev => prev.map(s => {
-        if (s.id === deletedMatched.id) {
-          return {
-            ...s,
-            isDeleted: false,
-            classroom: addForm.classroom,
-            notes: addForm.notes || s.notes, // 비고가 비어있으면 기존 비고 유지, 있으면 덮어씀
-          };
-        }
-        return s;
-      }));
+      setStudents(prev => {
+        const next = prev.map(s => {
+          if (s.id === deletedMatched.id) {
+            return {
+              ...s,
+              isDeleted: false,
+              classroom: addForm.classroom,
+              notes: addForm.notes || s.notes, // 비고가 비어있으면 기존 비고 유지, 있으면 덮어씀
+            };
+          }
+          return s;
+        });
+        // 즉시 로컬 및 Firebase 저장 (새로고침 및 세션 탈출에 따른 소실 방지)
+        safeLocalStorage.setItem('self_study_attendance_students_v2', JSON.stringify(next));
+        saveAllStudentsToFirebase(next).catch(err => console.error('Firebase 즉시 복구 동기화 실패:', err));
+        return next;
+      });
       setIsAddModalOpen(false);
       setAddForm({ studentId: '', name: '', classroom: '3-1', notes: '' });
       showToast(`${addForm.name} 학생의 기존 출석 통계 기록을 감지하여 정상 복구 및 연동하였습니다.`, 'success');
@@ -540,7 +546,13 @@ export default function App() {
       attendanceHistory: []
     };
 
-    setStudents(prev => [...prev, newStudent]);
+    setStudents(prev => {
+      const next = [...prev, newStudent];
+      // 즉시 로컬 및 Firebase 저장 (새로고침 및 세션 탈출에 따른 소실 방지)
+      safeLocalStorage.setItem('self_study_attendance_students_v2', JSON.stringify(next));
+      saveAllStudentsToFirebase(next).catch(err => console.error('Firebase 즉시 추가 동기화 실패:', err));
+      return next;
+    });
     setIsAddModalOpen(false);
     setAddForm({ studentId: '', name: '', classroom: '3-1', notes: '' });
     showToast(`${newStudent.name} 학생이 자율학습 명단에 정상 등록되었습니다.`, 'success');
@@ -549,12 +561,18 @@ export default function App() {
   // --- 학생 명단 원장 삭제 ---
   const handleDeleteStudent = (studentId: string, name: string) => {
     if (confirm(`실제 학생 [${name}]을 자율학습 명단에서 삭제하시겠습니까?\n(통계 기록은 안전하게 보존되며, 이후 동일 학번 및 이름으로 추가 시 자동 복구됩니다.)`)) {
-      setStudents(prev => prev.map(s => {
-        if (s.id === studentId) {
-          return { ...s, isDeleted: true };
-        }
-        return s;
-      }));
+      setStudents(prev => {
+        const next = prev.map(s => {
+          if (s.id === studentId) {
+            return { ...s, isDeleted: true };
+          }
+          return s;
+        });
+        // 즉시 로컬 및 Firebase 저장 (새로고침 및 세션 탈출에 따른 소실 방지)
+        safeLocalStorage.setItem('self_study_attendance_students_v2', JSON.stringify(next));
+        saveAllStudentsToFirebase(next).catch(err => console.error('Firebase 즉시 삭제 동기화 실패:', err));
+        return next;
+      });
       showToast(`${name} 학생이 자율학습 명단에서 제외되었습니다. (통계 보존)`, 'info');
     }
   };
@@ -885,6 +903,11 @@ export default function App() {
     });
   }, [filteredStudents, activeTabDay]);
 
+  // 전체 활동 중인 학생 수
+  const activeStudentsCount = useMemo(() => {
+    return students.filter(s => !s.isDeleted).length;
+  }, [students]);
+
   // 전체 경고 대상 학생 수
   const warningStudentsCount = useMemo(() => {
     return students.filter(s => s.isWarning && !s.isDeleted).length;
@@ -1109,7 +1132,7 @@ export default function App() {
               <div className="text-right">
                 <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">현재 자율학습 참여 현황</div>
                 <div className="text-sm font-bold text-white mt-0.5">
-                  총 {students.length}명 <span className="text-zinc-600">/</span> <span className="text-[var(--color-point-yellow)]">경고 {warningStudentsCount}명</span>
+                  총 {activeStudentsCount}명 <span className="text-zinc-600">/</span> <span className="text-[var(--color-point-yellow)]">경고 {warningStudentsCount}명</span>
                 </div>
               </div>
             </div>
@@ -1482,7 +1505,7 @@ export default function App() {
                   </div>
                   
                   <span className="text-zinc-500 font-medium">
-                    * 전체 73명 교사 보조 일람표 / 누적 비 참여일 자동 제명
+                    * 전체 {activeStudentsCount}명 교사 보조 일람표 / 누적 비 참여일 자동 제명
                   </span>
                 </div>
               </div>
