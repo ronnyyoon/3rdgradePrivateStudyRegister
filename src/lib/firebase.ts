@@ -1,5 +1,16 @@
 import { initializeApp } from 'firebase/app';
-import { initializeFirestore, collection, doc, getDocs, getDoc, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
+import {
+  initializeFirestore,
+  collection,
+  doc,
+  getDocs,
+  getDoc,
+  setDoc,
+  deleteDoc,
+  writeBatch,
+  onSnapshot,
+  Unsubscribe,
+} from 'firebase/firestore';
 import { Student } from '../types';
 
 const firebaseConfig = {
@@ -61,12 +72,41 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     path
   };
   console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
 }
 
 /**
- * Firestore로부터 전체 학생 목록을 가져옵니다.
- * 만약 비어있다면, 제공된 initialStudents를 최초 1회 Firebase에 업로드 한 후 반환합니다.
+ * 실시간으로 학생 목록을 구독(listen)합니다.
+ */
+export function subscribeToStudents(
+  onUpdate: (students: Student[]) => void,
+  onError?: (error: unknown) => void
+): Unsubscribe {
+  try {
+    const colRef = collection(db, COLLECTION_NAME);
+    return onSnapshot(
+      colRef,
+      (snapshot) => {
+        const list: Student[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as Student);
+        });
+        list.sort((a, b) => a.studentId.localeCompare(b.studentId));
+        onUpdate(list);
+      },
+      (err) => {
+        console.error('Firestore onSnapshot error:', err);
+        if (onError) onError(err);
+      }
+    );
+  } catch (err) {
+    console.error('Failed to initialize subscription:', err);
+    if (onError) onError(err);
+    return () => {};
+  }
+}
+
+/**
+ * Firestore로부터 전체 학생 목록을 1회 가져옵니다.
  */
 export async function loadStudentsFromFirebase(initialStudents: Student[]): Promise<Student[]> {
   try {
@@ -83,11 +123,54 @@ export async function loadStudentsFromFirebase(initialStudents: Student[]): Prom
       return initialStudents;
     }
     
-    // 학번(studentId) 순으로 오름차순 정렬하여 일관되게 제공
     return students.sort((a, b) => a.studentId.localeCompare(b.studentId));
   } catch (error) {
     console.error('Firebase 로드 오류:', error);
     handleFirestoreError(error, OperationType.LIST, COLLECTION_NAME);
+    throw error;
+  }
+}
+
+/**
+ * 신규 학생을 Firebase에 추가합니다.
+ */
+export async function addStudentToFirebase(student: Student): Promise<void> {
+  try {
+    const studentDocRef = doc(db, COLLECTION_NAME, student.id);
+    await setDoc(studentDocRef, student);
+    console.log(`[Firebase] 학생 등록 완료: ${student.name}`);
+  } catch (error) {
+    console.error(`Firebase 학생 등록 오류 (${student.name}):`, error);
+    handleFirestoreError(error, OperationType.CREATE, `${COLLECTION_NAME}/${student.id}`);
+    throw error;
+  }
+}
+
+/**
+ * 특정 학생의 변경 사항을 Firebase에 업데이트합니다.
+ */
+export async function updateStudentInFirebase(studentId: string, partial: Partial<Student>): Promise<void> {
+  try {
+    const studentDocRef = doc(db, COLLECTION_NAME, studentId);
+    await setDoc(studentDocRef, partial, { merge: true });
+  } catch (error) {
+    console.error(`Firebase 학생 업데이트 오류 (${studentId}):`, error);
+    handleFirestoreError(error, OperationType.WRITE, `${COLLECTION_NAME}/${studentId}`);
+    throw error;
+  }
+}
+
+/**
+ * 학생을 Firebase에서 완전히 삭제합니다.
+ */
+export async function deleteStudentFromFirebase(studentId: string): Promise<void> {
+  try {
+    const studentDocRef = doc(db, COLLECTION_NAME, studentId);
+    await deleteDoc(studentDocRef);
+    console.log(`[Firebase] 학생 문서 영구 삭제 완료: ${studentId}`);
+  } catch (error) {
+    console.error(`Firebase 학생 삭제 오류 (${studentId}):`, error);
+    handleFirestoreError(error, OperationType.DELETE, `${COLLECTION_NAME}/${studentId}`);
     throw error;
   }
 }
@@ -103,7 +186,7 @@ export async function saveAllStudentsToFirebase(students: Student[]): Promise<vo
       batch.set(studentDocRef, student);
     });
     await batch.commit();
-    console.log(`${students.length}명의 학생 데이터가 Firebase에 성공적으로 일괄 보존 저장되었습니다.`);
+    console.log(`${students.length}명의 학생 데이터가 Firebase에 성공적으로 일괄 저장되었습니다.`);
   } catch (error) {
     console.error('Firebase 일괄 저장 오류:', error);
     handleFirestoreError(error, OperationType.WRITE, COLLECTION_NAME);
@@ -112,82 +195,29 @@ export async function saveAllStudentsToFirebase(students: Student[]): Promise<vo
 }
 
 /**
- * 특정 학생의 변경 사항을 Firebase에 업데이트합니다.
+ * 기존 Firebase의 이전 명단을 완전히 지우고 새 명단으로 전면 교체합니다.
  */
-export async function updateStudentInFirebase(student: Student): Promise<void> {
+export async function replaceAllStudentsInFirebase(students: Student[]): Promise<void> {
   try {
-    const studentDocRef = doc(db, COLLECTION_NAME, student.id);
-    await setDoc(studentDocRef, student, { merge: true });
-    console.log(`[Firebase] 학생 수시 동기화 완료: ${student.name}`);
+    const querySnapshot = await getDocs(collection(db, COLLECTION_NAME));
+    const batch = writeBatch(db);
+    
+    // 기존 문서 삭제
+    querySnapshot.forEach((d) => {
+      batch.delete(d.ref);
+    });
+    
+    // 새 학생 명단 추가
+    students.forEach((student) => {
+      const studentDocRef = doc(db, COLLECTION_NAME, student.id);
+      batch.set(studentDocRef, student);
+    });
+    
+    await batch.commit();
+    console.log(`[Firebase] ${students.length}명의 새로운 재편성 명단으로 완전 교체 완료`);
   } catch (error) {
-    console.error(`Firebase 학생 업데이트 오류 (${student.name}):`, error);
-    handleFirestoreError(error, OperationType.WRITE, `${COLLECTION_NAME}/${student.id}`);
+    console.error('Firebase 전면 교체 오류:', error);
+    handleFirestoreError(error, OperationType.WRITE, COLLECTION_NAME);
     throw error;
-  }
-}
-
-/**
- * Firebase로부터 마지막 리셋 월요일 날짜를 읽어옵니다.
- */
-export async function getWeeklyResetMondayFromFirebase(): Promise<string | null> {
-  try {
-    const docRef = doc(db, 'settings', 'weekly_reset');
-    const docSnap = await getDoc(docRef);
-    if (docSnap.exists()) {
-      const data = docSnap.data();
-      return data.lastResetMonday || null;
-    }
-    return null;
-  } catch (error) {
-    console.error('Firebase 리셋 정보 로드 오류:', error);
-    handleFirestoreError(error, OperationType.GET, 'settings/weekly_reset');
-    return null;
-  }
-}
-
-/**
- * Firebase에 마지막 리셋 월요일 날짜를 기록합니다.
- */
-export async function saveWeeklyResetMondayToFirebase(monStr: string): Promise<void> {
-  try {
-    const docRef = doc(db, 'settings', 'weekly_reset');
-    await setDoc(docRef, { lastResetMonday: monStr }, { merge: true });
-    console.log('[Firebase] 주간 리셋 월요일 날짜가 성공적으로 저장되었습니다:', monStr);
-  } catch (error) {
-    console.error('Firebase 리셋 정보 저장 오류:', error);
-    handleFirestoreError(error, OperationType.WRITE, 'settings/weekly_reset');
-  }
-}
-
-/**
- * Firebase로부터 수목금 리셋 월요일 날짜를 읽어옵니다.
- */
-export async function getWeeklyWedThuFriResetMondayFromFirebase(): Promise<string | null> {
-  try {
-    const docRef = doc(db, 'settings', 'weekly_reset');
-    const docSnap = await getDoc(docRef);
-    if (docSnap.exists()) {
-      const data = docSnap.data();
-      return data.lastWedThuFriResetMonday || null;
-    }
-    return null;
-  } catch (error) {
-    console.error('Firebase 수목금 리셋 정보 로드 오류:', error);
-    handleFirestoreError(error, OperationType.GET, 'settings/weekly_reset');
-    return null;
-  }
-}
-
-/**
- * Firebase에 수목금 리셋 월요일 날짜를 기록합니다.
- */
-export async function saveWeeklyWedThuFriResetMondayToFirebase(monStr: string): Promise<void> {
-  try {
-    const docRef = doc(db, 'settings', 'weekly_reset');
-    await setDoc(docRef, { lastWedThuFriResetMonday: monStr }, { merge: true });
-    console.log('[Firebase] 수목금 리셋 날짜 저장 완료:', monStr);
-  } catch (error) {
-    console.error('Firebase 수목금 리셋 정보 저장 오류:', error);
-    handleFirestoreError(error, OperationType.WRITE, 'settings/weekly_reset');
   }
 }
