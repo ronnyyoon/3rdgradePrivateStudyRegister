@@ -28,6 +28,9 @@ import {
   updateStudentInFirebase,
   deleteStudentFromFirebase,
   replaceAllStudentsInFirebase,
+  getAttendanceMetadata,
+  saveAttendanceMetadata,
+  AttendanceMetadata,
 } from './lib/firebase';
 import {
   DAYS,
@@ -36,6 +39,11 @@ import {
   getStudentRoomForDay,
   isSaturdayNonParticipant,
   isWeekdayNonParticipant,
+  getMondayOfDate,
+  formatDateYYMMDD,
+  parseDateFromYYMMDD,
+  getWeekDatesForMonday,
+  archiveAndResetWeek,
 } from './utils/attendanceUtils';
 
 // 분리된 뷰 및 모달 컴포넌트
@@ -46,8 +54,7 @@ import { StudentDetailModal } from './components/StudentDetailModal';
 import { StudentAddModal } from './components/StudentAddModal';
 
 const LOCAL_STORAGE_KEY = 'highschool_nightstudy_attendance_v7_unconfirmed';
-const ROSTER_SYNC_KEY = 'self_study_roster_sync_v7_47students';
-const CURRENT_ROSTER_VERSION = 'v7_47students_2026_unconfirmed_default';
+const LOCAL_STORAGE_META_KEY = 'highschool_nightstudy_meta_v7';
 
 // Helper: 학생 출석 데이터 공란('미참여일') 정규화 보장
 function normalizeStudentAttendance(student: Student): Student {
@@ -66,47 +73,13 @@ function normalizeStudentAttendance(student: Student): Student {
   return {
     ...student,
     attendance: normAttendance,
+    attendanceHistory: student.attendanceHistory || [],
   };
 }
 
-// 이번 주 월~토 날짜 계산기
-const getThisWeekDates = (): Record<DayOfWeek, string> => {
-  const now = new Date();
-  const currentDayIndex = now.getDay(); // 0(일) ~ 6(토)
-  
-  // 월요일 기준으로 offset 계산
-  const diffToMonday = currentDayIndex === 0 ? -6 : 1 - currentDayIndex;
-  
-  const monday = new Date(now);
-  monday.setDate(now.getDate() + diffToMonday);
-
-  const formatDate = (date: Date) => {
-    const y = String(date.getFullYear()).slice(-2);
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}.${m}.${d}`;
-  };
-
-  const dates: Record<DayOfWeek, string> = {
-    '월': '',
-    '화': '',
-    '수': '',
-    '목': '',
-    '금': '',
-    '토': '',
-  };
-
-  DAYS.forEach((day, index) => {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + index);
-    dates[day] = formatDate(d);
-  });
-
-  return dates;
-};
-
 export default function App() {
   const [students, setStudents] = useState<Student[]>([]);
+  const [metadata, setMetadata] = useState<AttendanceMetadata | null>(null);
   const [currentMenu, setCurrentMenu] = useState<NavigationMenu>('attendance');
   const [activeTabDay, setActiveTabDay] = useState<DayOfWeek>(() => {
     const dayNames: DayOfWeek[] = ['토', '월', '화', '수', '목', '금', '토'];
@@ -116,7 +89,14 @@ export default function App() {
   const [selectedClassroom, setSelectedClassroom] = useState<'전체' | Classroom>('전체');
   const [warningOnlyFilter, setWarningOnlyFilter] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [dateMap] = useState<Record<DayOfWeek, string>>(getThisWeekDates);
+
+  // 현재 날짜 기준 주차 계산 (월요일 시작)
+  const currentMondayDate = useMemo(() => getMondayOfDate(new Date()), []);
+  const currentMondayStr = useMemo(() => formatDateYYMMDD(currentMondayDate), [currentMondayDate]);
+  const dateMap = useMemo(() => getWeekDatesForMonday(currentMondayDate), [currentMondayDate]);
+
+  // 47명 원본 명단 매핑
+  const initialStudentsMap = useMemo(() => new Map(INITIAL_STUDENTS.map(s => [s.id, s])), []);
 
   // 모달 상태
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
@@ -144,22 +124,67 @@ export default function App() {
     setToast({ message, type });
     setTimeout(() => {
       setToast(null);
-    }, 3200);
+    }, 3500);
   };
 
-  // 1. 데이터 로드 및 Firebase 실시간 연동 (47명 최신 편성표 클린 동기화)
+  // 주간 갱신 처리 완료 여부 플래그
+  const rolloverCheckDone = useRef(false);
+
+  // 1. 데이터 로드 및 Firebase 실시간 연동 (월요일 자동 리셋 & 주간 누적)
   useEffect(() => {
     let unsubscribe = () => {};
 
-    // 최신 버전 체크 및 최초 1회 강제 클린 동기화
-    const syncVersion = localStorage.getItem(ROSTER_SYNC_KEY);
-    if (syncVersion !== CURRENT_ROSTER_VERSION) {
-      console.log('[Roster] 새 47명 편성표로 클린 초기화 수행 중...');
-      setStudents(INITIAL_STUDENTS);
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(INITIAL_STUDENTS));
-      localStorage.setItem(ROSTER_SYNC_KEY, CURRENT_ROSTER_VERSION);
-      replaceAllStudentsInFirebase(INITIAL_STUDENTS).catch(console.error);
-    }
+    // 1-1. 시스템 메타데이터 확인 및 월요일 자동 롤오버 체크
+    const checkWeeklyRollover = async (currentList: Student[]) => {
+      if (rolloverCheckDone.current) return;
+      rolloverCheckDone.current = true;
+
+      try {
+        let meta = await getAttendanceMetadata();
+        if (!meta) {
+          const localMeta = localStorage.getItem(LOCAL_STORAGE_META_KEY);
+          if (localMeta) {
+            try { meta = JSON.parse(localMeta); } catch {}
+          }
+        }
+
+        if (meta && meta.activeWeekMonday && meta.activeWeekMonday !== currentMondayStr) {
+          // 새 주차(월요일)가 시작됨! 이전 주차 기록 누적 아카이빙 및 출석부 초기화 수행
+          console.log(`[Weekly Rollover] 새 주차 감지: 지난 주(${meta.activeWeekMonday}) -> 이번 주(${currentMondayStr})`);
+          
+          const prevMondayDate = parseDateFromYYMMDD(meta.activeWeekMonday) || new Date(currentMondayDate.getTime() - 7 * 86400000);
+          const prevWeekDates = getWeekDatesForMonday(prevMondayDate);
+
+          const rolledOverList = archiveAndResetWeek(currentList, prevWeekDates, initialStudentsMap);
+          setStudents(rolledOverList);
+          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(rolledOverList));
+          await replaceAllStudentsInFirebase(rolledOverList);
+
+          const newMeta: AttendanceMetadata = {
+            activeWeekMonday: currentMondayStr,
+            lastArchivedWeekMonday: meta.activeWeekMonday,
+            lastArchivedAt: new Date().toISOString(),
+          };
+          setMetadata(newMeta);
+          localStorage.setItem(LOCAL_STORAGE_META_KEY, JSON.stringify(newMeta));
+          await saveAttendanceMetadata(newMeta);
+
+          showToast(`[주간 갱신] 새로운 주차가 시작되어 지난 주(${meta.activeWeekMonday}) 출석 기록이 누적 저장되고, 이번 주 출석부가 초기화되었습니다.`, 'success');
+        } else {
+          // 동일 주차 내 유지
+          const currentMeta: AttendanceMetadata = meta || {
+            activeWeekMonday: currentMondayStr,
+          };
+          setMetadata(currentMeta);
+          localStorage.setItem(LOCAL_STORAGE_META_KEY, JSON.stringify(currentMeta));
+          if (!meta) {
+            await saveAttendanceMetadata(currentMeta);
+          }
+        }
+      } catch (err) {
+        console.error('Weekly rollover check error:', err);
+      }
+    };
 
     try {
       unsubscribe = subscribeToStudents(
@@ -168,8 +193,9 @@ export default function App() {
             const normalized = data.map(normalizeStudentAttendance);
             setStudents(normalized);
             localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(normalized));
+            checkWeeklyRollover(normalized);
           } else {
-            // 로컬 스토리지 확인
+            // Firestore가 비어있는 경우 로컬 스토리지 또는 INITIAL_STUDENTS로 최초 세팅
             const localData = localStorage.getItem(LOCAL_STORAGE_KEY);
             if (localData) {
               try {
@@ -177,6 +203,8 @@ export default function App() {
                 if (Array.isArray(parsed) && parsed.length > 0) {
                   const normalized = parsed.map(normalizeStudentAttendance);
                   setStudents(normalized);
+                  replaceAllStudentsInFirebase(normalized).catch(console.error);
+                  checkWeeklyRollover(normalized);
                   return;
                 }
               } catch (e) {
@@ -186,8 +214,8 @@ export default function App() {
             // 디폴트 초기 명단 세팅
             setStudents(INITIAL_STUDENTS);
             localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(INITIAL_STUDENTS));
-            // Firebase에 초기 명단 업로드
             replaceAllStudentsInFirebase(INITIAL_STUDENTS).catch(console.error);
+            checkWeeklyRollover(INITIAL_STUDENTS);
           }
         },
         (error) => {
@@ -196,12 +224,16 @@ export default function App() {
           if (localData) {
             try {
               const parsed = JSON.parse(localData);
-              setStudents(parsed.map(normalizeStudentAttendance));
+              const normalized = parsed.map(normalizeStudentAttendance);
+              setStudents(normalized);
+              checkWeeklyRollover(normalized);
             } catch {
               setStudents(INITIAL_STUDENTS);
+              checkWeeklyRollover(INITIAL_STUDENTS);
             }
           } else {
             setStudents(INITIAL_STUDENTS);
+            checkWeeklyRollover(INITIAL_STUDENTS);
           }
         }
       );
@@ -210,7 +242,7 @@ export default function App() {
     }
 
     return () => unsubscribe();
-  }, []);
+  }, [currentMondayStr, currentMondayDate, initialStudentsMap]);
 
   // 2. students 변경 시 로컬 스토리지 백업
   useEffect(() => {
@@ -218,6 +250,35 @@ export default function App() {
       localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(students));
     }
   }, [students]);
+
+  // 관리자 수동 주간 마감 및 새 주차 출석부 시작 핸들러
+  const handleManualWeekRollover = async () => {
+    const confirmMsg = `현재 주차(${currentMondayStr} 시작 주간)의 출석체크 내용을 학생별 '누적 출석 이력'에 저장하고,\n새로운 주차 출석부로 초기화하시겠습니까?`;
+    if (!window.confirm(confirmMsg)) {
+      return;
+    }
+
+    try {
+      const rolledOver = archiveAndResetWeek(students, dateMap, initialStudentsMap);
+      setStudents(rolledOver);
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(rolledOver));
+      await replaceAllStudentsInFirebase(rolledOver);
+
+      const newMeta: AttendanceMetadata = {
+        activeWeekMonday: currentMondayStr,
+        lastArchivedWeekMonday: currentMondayStr,
+        lastArchivedAt: new Date().toISOString(),
+      };
+      setMetadata(newMeta);
+      localStorage.setItem(LOCAL_STORAGE_META_KEY, JSON.stringify(newMeta));
+      await saveAttendanceMetadata(newMeta);
+
+      showToast('성공적으로 이번 주 출석 기록이 누적 저장되고, 새 주차 출석부로 초기화되었습니다.', 'success');
+    } catch (e) {
+      console.error('Manual rollover failed:', e);
+      showToast('주간 마감 처리 중 오류가 발생했습니다.', 'error');
+    }
+  };
 
   // 활성(비삭제) 학생 수
   const activeStudentsCount = useMemo(() => {
@@ -721,6 +782,9 @@ export default function App() {
             forceResetAllToFixed={forceResetAllToFixed}
             resetAllFixedSettings={resetAllFixedSettings}
             restoreFromInitialRoster={restoreFromInitialRoster}
+            handleManualWeekRollover={handleManualWeekRollover}
+            currentWeekMonday={currentMondayStr}
+            lastArchivedWeekMonday={metadata?.lastArchivedWeekMonday}
             showToast={showToast}
           />
         )}

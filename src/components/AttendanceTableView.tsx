@@ -243,15 +243,17 @@ export const AttendanceTableView: React.FC<AttendanceTableViewProps> = ({
 
       {/* 2. 출석부 요일 선택 (월~토 6개 요일 탭) */}
       <div className="bg-[#1E1E1E] p-4 rounded-2xl border border-[rgba(255,215,0,0.12)]">
-        <label className="text-[11px] font-bold text-zinc-400 flex items-center justify-between mb-3">
+        <div className="text-[11px] font-bold text-zinc-400 flex flex-wrap items-center justify-between gap-2 mb-3">
           <span className="flex items-center space-x-1.5">
             <Calendar className="w-3.5 h-3.5 text-[var(--color-point-yellow)]" />
             <span>출석부 요일 선택</span>
+            <span className="text-zinc-500 font-mono text-[10.5px]">({dateMap['월']} ~ {dateMap['토']})</span>
           </span>
-          <span className="text-[10px] text-zinc-500">
-            * 토요일은 별도 자습교실 배정 및 4교시(오전/오후) 체제
+          <span className="text-[10px] text-emerald-400/90 bg-emerald-950/40 px-2 py-0.5 rounded-md border border-emerald-800/30 flex items-center space-x-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block"></span>
+            <span>매주 월요일 자동 리셋 & 이전 주 누적 보존</span>
           </span>
-        </label>
+        </div>
         
         <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
           {DAYS.map((day) => {

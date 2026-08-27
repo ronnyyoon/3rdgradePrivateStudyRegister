@@ -1,4 +1,4 @@
-import { DayOfWeek, AttendanceStatus, Student, PeriodAttendance } from '../types';
+import { DayOfWeek, AttendanceStatus, Student, PeriodAttendance, AttendanceHistoryItem } from '../types';
 
 export const DAYS: DayOfWeek[] = ['월', '화', '수', '목', '금', '토'];
 
@@ -11,6 +11,75 @@ export const STATUS_CYCLE: AttendanceStatus[] = [
   '미참여일',
   '미인정결'
 ];
+
+/**
+ * 주어진 날짜(또는 현재)가 속한 주의 월요일 Date 객체를 반환합니다.
+ * (일요일은 해당 주 일요일이므로 이전 월요일 기준으로 산정)
+ */
+export const getMondayOfDate = (d: Date = new Date()): Date => {
+  const date = new Date(d);
+  const day = date.getDay(); // 0(일) ~ 6(토)
+  const diff = day === 0 ? -6 : 1 - day;
+  date.setDate(date.getDate() + diff);
+  date.setHours(0, 0, 0, 0);
+  return date;
+};
+
+/**
+ * Date 객체를 YY.MM.DD 포맷 문자열로 변환 (예: 26.08.24)
+ */
+export const formatDateYYMMDD = (date: Date): string => {
+  const y = String(date.getFullYear()).slice(-2);
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}.${m}.${d}`;
+};
+
+/**
+ * YY.MM.DD 문자열을 Date 객체로 파싱
+ */
+export const parseDateFromYYMMDD = (dStr: string): Date | null => {
+  if (!dStr) return null;
+  const parts = dStr.split('.');
+  if (parts.length === 3) {
+    let year = parseInt(parts[0], 10);
+    if (year < 100) year += 2000;
+    const month = parseInt(parts[1], 10) - 1;
+    const day = parseInt(parts[2], 10);
+    return new Date(year, month, day);
+  }
+  return null;
+};
+
+/**
+ * 특정 월요일 기준 월~토 날짜 매핑 획득
+ */
+export const getWeekDatesForMonday = (monday: Date): Record<DayOfWeek, string> => {
+  const dates: Record<DayOfWeek, string> = {
+    '월': '',
+    '화': '',
+    '수': '',
+    '목': '',
+    '금': '',
+    '토': '',
+  };
+
+  DAYS.forEach((day, index) => {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + index);
+    dates[day] = formatDateYYMMDD(d);
+  });
+
+  return dates;
+};
+
+/**
+ * 이번 주 월~토 날짜 계산기
+ */
+export const getThisWeekDates = (): Record<DayOfWeek, string> => {
+  const monday = getMondayOfDate(new Date());
+  return getWeekDatesForMonday(monday);
+};
 
 /**
  * 학생의 특정 요일, 특정 교시 출석 상태를 반환하며, 공란/미설정 시 기본값 '미참여일'을 보장합니다.
@@ -314,3 +383,108 @@ export const getSelectStyle = (status: AttendanceStatus): string => {
       return 'bg-zinc-900 text-zinc-500 border-zinc-800/80 font-normal';
   }
 };
+
+/**
+ * 주간 마감 및 출석 데이터 누적 아카이빙 & 새 주차 출석부 초기화
+ * - 지난 주에 체크된 실제 출석 상태(출석, 수업, 병결, 개인사, 미인정결)를 attendanceHistory에 날짜/교시별로 누적 저장
+ * - 새 주차 출석부(attendance)는 기본 세팅(참여 교시는 '미확인', 비참여는 '미참여일')으로 초기화
+ */
+export const archiveAndResetWeek = (
+  students: Student[],
+  prevWeekDates: Record<DayOfWeek, string>,
+  initialStudentsMap?: Map<string, Student>
+): Student[] => {
+  return students.map(student => {
+    // 1. 이전 주차에 체크된 유효 출석 데이터 수집
+    const newHistoryItems: AttendanceHistoryItem[] = [];
+
+    DAYS.forEach(day => {
+      const dateStr = prevWeekDates[day];
+      const pData = student.attendance[day];
+      if (!pData || !dateStr) return;
+
+      const periods = getPeriodsForDay(day);
+      periods.forEach(p => {
+        const status = pData[p];
+        // '미확인', '미참여일'은 이력에 남기지 않고, 실제 체크된 '출석', '수업', '병결', '개인사', '미인정결'만 보존
+        if (status && status !== '미확인' && status !== '미참여일') {
+          newHistoryItems.push({
+            date: dateStr,
+            day,
+            period: getPeriodLabel(day, p),
+            status,
+          });
+        }
+      });
+    });
+
+    // 2. 기존 이력과 병합 (중복 방지: 날짜 + 교시 기준)
+    const existingHistory = student.attendanceHistory || [];
+    const combinedHistory = [...existingHistory];
+
+    newHistoryItems.forEach(item => {
+      const normDate = normalizeDateStr(item.date);
+      const isAlreadySaved = combinedHistory.some(
+        h => normalizeDateStr(h.date) === normDate && h.period === item.period
+      );
+      if (!isAlreadySaved) {
+        combinedHistory.push(item);
+      }
+    });
+
+    // 3. 새 주차 출석부 초기화
+    // 학생별 기본 편성(fixedSettings 또는 initialStudents)을 기반으로 리셋
+    const freshAttendance: Student['attendance'] = {
+      '월': { p1: '미참여일', p2: '미참여일', p3: '미참여일' },
+      '화': { p1: '미참여일', p2: '미참여일', p3: '미참여일' },
+      '수': { p1: '미참여일', p2: '미참여일', p3: '미참여일' },
+      '목': { p1: '미참여일', p2: '미참여일', p3: '미참여일' },
+      '금': { p1: '미참여일', p2: '미참여일', p3: '미참여일' },
+      '토': { p1: '미참여일', p2: '미참여일', p3: '미참여일', p4: '미참여일' },
+    };
+
+    const initialStudent = initialStudentsMap?.get(student.id);
+
+    if (student.fixedSettings) {
+      // fixedSettings가 있는 경우: '출석' 또는 '미확인'으로 지정된 것은 새 주차 '미확인'으로, '수업'/'미참여일' 등은 유지
+      DAYS.forEach(d => {
+        const periods = getPeriodsForDay(d);
+        const fixedDay = student.fixedSettings![d] || {};
+        periods.forEach(p => {
+          const val = fixedDay[p];
+          if (val === '출석' || val === '미확인') {
+            freshAttendance[d][p] = '미확인';
+          } else if (val) {
+            freshAttendance[d][p] = val;
+          } else {
+            freshAttendance[d][p] = '미참여일';
+          }
+        });
+      });
+    } else if (initialStudent) {
+      // 초기 47명 원본 명단 기준 복원
+      DAYS.forEach(d => {
+        const periods = getPeriodsForDay(d);
+        const initDay = initialStudent.attendance[d] || {};
+        periods.forEach(p => {
+          freshAttendance[d][p] = initDay[p] || '미참여일';
+        });
+      });
+    } else {
+      // 신규 등록 학생 등의 기본값 (평일 p1~p3 '미확인', 토요일 '미참여일')
+      DAYS.forEach(d => {
+        const periods = getPeriodsForDay(d);
+        periods.forEach(p => {
+          freshAttendance[d][p] = d === '토' ? '미참여일' : '미확인';
+        });
+      });
+    }
+
+    return {
+      ...student,
+      attendance: freshAttendance,
+      attendanceHistory: combinedHistory,
+    };
+  });
+};
+

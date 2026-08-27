@@ -37,6 +37,15 @@ export const db = dbId
   : initializeFirestore(app, { experimentalForceLongPolling: true });
 
 const COLLECTION_NAME = 'students';
+const META_COLLECTION = 'system';
+const META_DOC = 'attendance_meta';
+
+export interface AttendanceMetadata {
+  activeWeekMonday: string; // e.g. '26.08.24'
+  lastArchivedWeekMonday?: string;
+  lastArchivedAt?: string;
+  rosterVersion?: string;
+}
 
 export enum OperationType {
   CREATE = 'create',
@@ -72,6 +81,35 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     path
   };
   console.error('Firestore Error: ', JSON.stringify(errInfo));
+}
+
+/**
+ * 시스템 출석 메타데이터(현재 활성 주차 월요일 등)를 가져옵니다.
+ */
+export async function getAttendanceMetadata(): Promise<AttendanceMetadata | null> {
+  try {
+    const docRef = doc(db, META_COLLECTION, META_DOC);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      return snap.data() as AttendanceMetadata;
+    }
+    return null;
+  } catch (error) {
+    console.error('Attendance metadata fetch error:', error);
+    return null;
+  }
+}
+
+/**
+ * 시스템 출석 메타데이터를 저장합니다.
+ */
+export async function saveAttendanceMetadata(meta: Partial<AttendanceMetadata>): Promise<void> {
+  try {
+    const docRef = doc(db, META_COLLECTION, META_DOC);
+    await setDoc(docRef, meta, { merge: true });
+  } catch (error) {
+    console.error('Attendance metadata save error:', error);
+  }
 }
 
 /**

@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { User, X, AlertTriangle, CheckCircle, Save, Clock } from 'lucide-react';
-import { Student, DayOfWeek, AttendanceHistoryItem } from '../types';
+import { Student, DayOfWeek, AttendanceHistoryItem, AttendanceStatus } from '../types';
 import { createDefaultAttendance } from '../data';
 import { DAYS, getPeriodsForDay, getPeriodLabel, getStudentEarlyLeaveText } from '../utils/attendanceUtils';
 
@@ -159,68 +159,124 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
 
           {/* 3. 누적 자습 출석 이력 */}
           <div className="space-y-2">
-            <label className="text-[11px] font-bold text-zinc-400 flex items-center space-x-1.5">
-              <CheckCircle className="w-4 h-4 text-emerald-400" />
-              <span>누적 자습 성실 출석 이력 (출석한 날짜/교시 일람)</span>
+            <label className="text-[11px] font-bold text-zinc-400 flex items-center justify-between">
+              <span className="flex items-center space-x-1.5">
+                <CheckCircle className="w-4 h-4 text-emerald-400" />
+                <span>누적 자습 출석 이력 (이전 주차 및 현재 주차 기록 일람)</span>
+              </span>
             </label>
             
-            <div className="bg-zinc-900 border border-zinc-800 p-3.5 rounded-xl max-h-[140px] overflow-y-auto space-y-1.5">
-              {(() => {
-                const currentWeekDlog: AttendanceHistoryItem[] = [];
-                DAYS.forEach(day => {
-                  const pData = selectedStudent.attendance[day];
-                  if (!pData) return;
-                  const periods = getPeriodsForDay(day);
-                  
-                  periods.forEach(p => {
-                    const val = pData[p];
-                    if (val === '출석') {
-                      currentWeekDlog.push({
-                        date: dateMap[day],
-                        day,
-                        period: getPeriodLabel(day, p),
-                        status: '출석'
-                      });
-                    }
-                  });
-                });
-
-                const allHistory = [
-                  ...currentWeekDlog,
-                  ...(selectedStudent.attendanceHistory || [])
-                ].filter((v, i, a) => a.findIndex(h => h.date === v.date && h.period === v.period) === i);
-
-                if (allHistory.length === 0) {
-                  return (
-                    <div className="text-center py-4 text-zinc-500 text-xs">
-                      출석으로 인정 체크된 교시 내역이 존재하지 않습니다.
-                    </div>
-                  );
-                }
-
-                const normalizeForSort = (dStr: string) => {
-                  if (!dStr) return '';
-                  const parts = dStr.split('.');
-                  if (parts.length === 3) {
-                    const year = parts[0].length === 2 ? '20' + parts[0] : parts[0];
-                    const month = parts[1].padStart(2, '0');
-                    const day = parts[2].padStart(2, '0');
-                    return `${year}.${month}.${day}`;
+            {(() => {
+              const currentWeekDlog: AttendanceHistoryItem[] = [];
+              DAYS.forEach(day => {
+                const pData = selectedStudent.attendance[day];
+                if (!pData) return;
+                const periods = getPeriodsForDay(day);
+                
+                periods.forEach(p => {
+                  const val = pData[p];
+                  if (val && val !== '미확인' && val !== '미참여일') {
+                    currentWeekDlog.push({
+                      date: dateMap[day],
+                      day,
+                      period: getPeriodLabel(day, p),
+                      status: val
+                    });
                   }
-                  return dStr;
-                };
+                });
+              });
 
-                return allHistory
-                  .sort((a, b) => normalizeForSort(b.date).localeCompare(normalizeForSort(a.date)))
-                  .map((hist, idx) => (
-                    <div key={idx} className="flex items-center justify-between text-[11px] bg-zinc-850 px-2.5 py-1.5 rounded-lg border border-zinc-800/80">
-                      <span className="font-mono text-zinc-400">{hist.date} ({hist.day})</span>
-                      <span className="font-semibold text-zinc-300">{hist.period}</span>
-                      <span className="px-2 py-0.5 bg-emerald-950/45 text-emerald-400 rounded text-[9.5px] font-bold">인정출석</span>
+              // Combine current week with past archived history (deduplicate)
+              const allHistory = [
+                ...currentWeekDlog,
+                ...(selectedStudent.attendanceHistory || [])
+              ].filter((v, i, a) => a.findIndex(h => h.date === v.date && h.period === v.period) === i);
+
+              // Calculate metrics
+              let presentCount = 0;
+              let absentCount = 0;
+              let classCount = 0;
+
+              allHistory.forEach(h => {
+                if (h.status === '출석') presentCount++;
+                else if (h.status === '병결' || h.status === '개인사' || h.status === '미인정결') absentCount++;
+                else if (h.status === '수업') classCount++;
+              });
+
+              const totalChecked = presentCount + absentCount;
+              const rate = totalChecked > 0 ? Math.round((presentCount / totalChecked) * 100) : null;
+
+              const normalizeForSort = (dStr: string) => {
+                if (!dStr) return '';
+                const parts = dStr.split('.');
+                if (parts.length === 3) {
+                  const year = parts[0].length === 2 ? '20' + parts[0] : parts[0];
+                  const month = parts[1].padStart(2, '0');
+                  const day = parts[2].padStart(2, '0');
+                  return `${year}.${month}.${day}`;
+                }
+                return dStr;
+              };
+
+              const sortedHistory = allHistory.sort((a, b) => normalizeForSort(b.date).localeCompare(normalizeForSort(a.date)));
+
+              const getBadge = (status: AttendanceStatus) => {
+                switch (status) {
+                  case '출석':
+                    return <span className="px-2 py-0.5 bg-emerald-950/60 text-emerald-400 rounded text-[9.5px] font-bold border border-emerald-800/40">출석</span>;
+                  case '수업':
+                    return <span className="px-2 py-0.5 bg-blue-950/60 text-blue-400 rounded text-[9.5px] font-bold border border-blue-800/40">수업</span>;
+                  case '병결':
+                    return <span className="px-2 py-0.5 bg-orange-950/60 text-orange-400 rounded text-[9.5px] font-bold border border-orange-800/40">병결</span>;
+                  case '개인사':
+                    return <span className="px-2 py-0.5 bg-purple-950/60 text-purple-400 rounded text-[9.5px] font-bold border border-purple-800/40">개인사</span>;
+                  case '미인정결':
+                    return <span className="px-2 py-0.5 bg-rose-950/60 text-rose-400 rounded text-[9.5px] font-bold border border-rose-800/40">미인정</span>;
+                  default:
+                    return <span className="px-2 py-0.5 bg-zinc-800 text-zinc-400 rounded text-[9.5px] font-bold">{status}</span>;
+                }
+              };
+
+              return (
+                <div className="space-y-2">
+                  {/* 누적 통계 요약 바 */}
+                  <div className="grid grid-cols-4 gap-2 bg-zinc-900/90 p-2.5 rounded-xl border border-zinc-800 text-center text-xs">
+                    <div>
+                      <div className="text-[10px] text-zinc-400">누적 출석률</div>
+                      <div className="font-bold text-[var(--color-point-yellow)] font-mono text-sm">{rate !== null ? `${rate}%` : '-'}</div>
                     </div>
-                  ));
-              })()}
-            </div>
+                    <div>
+                      <div className="text-[10px] text-zinc-400">출석 인정</div>
+                      <div className="font-bold text-emerald-400 font-mono text-sm">{presentCount}회</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-zinc-400">결석(사유/미인정)</div>
+                      <div className="font-bold text-orange-400 font-mono text-sm">{absentCount}회</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-zinc-400">수업(제외)</div>
+                      <div className="font-bold text-blue-400 font-mono text-sm">{classCount}회</div>
+                    </div>
+                  </div>
+
+                  <div className="bg-zinc-900 border border-zinc-800 p-3 rounded-xl max-h-[160px] overflow-y-auto space-y-1.5">
+                    {sortedHistory.length === 0 ? (
+                      <div className="text-center py-4 text-zinc-500 text-xs">
+                        체크 완료된 출석 기록이 존재하지 않습니다.
+                      </div>
+                    ) : (
+                      sortedHistory.map((hist, idx) => (
+                        <div key={idx} className="flex items-center justify-between text-[11px] bg-zinc-850 px-2.5 py-1.5 rounded-lg border border-zinc-800/80">
+                          <span className="font-mono text-zinc-400">{hist.date} ({hist.day})</span>
+                          <span className="font-semibold text-zinc-300">{hist.period}</span>
+                          {getBadge(hist.status)}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
 

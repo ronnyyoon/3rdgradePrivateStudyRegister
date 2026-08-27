@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sliders, Filter, RefreshCw } from 'lucide-react';
+import { Sliders, Filter, RefreshCw, Calendar, Archive, CheckCircle2 } from 'lucide-react';
 import { Student, Classroom, DayOfWeek, AttendanceStatus } from '../types';
 import { createDefaultAttendance } from '../data';
 import { STATUS_CYCLE, getSelectStyle, getPeriodsForDay, getPeriodLabel, DAYS } from '../utils/attendanceUtils';
@@ -19,6 +19,9 @@ interface AdminSettingsViewProps {
   forceResetAllToFixed: () => void;
   resetAllFixedSettings: () => void;
   restoreFromInitialRoster: () => void;
+  handleManualWeekRollover: () => void;
+  currentWeekMonday: string;
+  lastArchivedWeekMonday?: string;
   showToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
 }
 
@@ -32,11 +35,49 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
   forceResetAllToFixed,
   resetAllFixedSettings,
   restoreFromInitialRoster,
+  handleManualWeekRollover,
+  currentWeekMonday,
+  lastArchivedWeekMonday,
   showToast,
 }) => {
   return (
     <div className="space-y-6">
-      {/* 1. 관리자 공지 및 제어 허브 */}
+      {/* 1. 주간 출석 마감 & 누적 관리 카드 */}
+      <div className="bg-[#1E1E1E] p-5 rounded-2xl border border-emerald-500/20 space-y-4 shadow-xl">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800 pb-3">
+          <div className="flex items-center space-x-2">
+            <Calendar className="w-5 h-5 text-emerald-400" />
+            <h4 className="font-bold text-white text-sm">주간 출석 자동 갱신 및 누적 아카이빙 현황</h4>
+          </div>
+          <div className="flex items-center space-x-2 text-xs">
+            <span className="px-2.5 py-1 bg-emerald-950/60 text-emerald-300 border border-emerald-800/50 rounded-lg font-mono font-medium">
+              현재 활성 주차 시작일: {currentWeekMonday} (월)
+            </span>
+            {lastArchivedWeekMonday && (
+              <span className="px-2.5 py-1 bg-zinc-800 text-zinc-400 border border-zinc-700 rounded-lg font-mono">
+                최근 누적 마감 주차: {lastArchivedWeekMonday}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <p className="text-zinc-400 text-xs leading-relaxed">
+            • <strong className="text-emerald-400">매주 월요일 자동 갱신</strong>: 매주 월요일이 되면 지난 주 출석 기록이 학생별 <strong className="text-white">누적 이력</strong>에 안전하게 보존되고, 이번 주 출석부가 '미확인'으로 자동 초기화됩니다.<br />
+            • 필요 시 아래 <strong className="text-amber-400">수동 마감</strong> 버튼을 클릭하여 언제든 현재 주차 기록을 즉시 누적 저장하고 새 주차로 시작할 수 있습니다.
+          </p>
+
+          <button
+            onClick={handleManualWeekRollover}
+            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition flex items-center space-x-2 cursor-pointer shrink-0 shadow-lg"
+          >
+            <Archive className="w-4 h-4" />
+            <span>이번 주 출석 수동 마감 & 새 주차 시작</span>
+          </button>
+        </div>
+      </div>
+
+      {/* 2. 관리자 공지 및 제어 허브 */}
       <div className="bg-zinc-900/80 p-5 rounded-2xl border border-zinc-800 space-y-3">
         <div className="flex items-center space-x-2">
           <Sliders className="w-5 h-5 text-[var(--color-point-yellow)]" />
