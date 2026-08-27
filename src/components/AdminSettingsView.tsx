@@ -120,7 +120,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
             <span className="text-xs font-bold text-white">필터 설정 대상실 (평일 기준)</span>
           </div>
           <div className="bg-zinc-900 p-1 rounded-xl flex gap-1 w-full sm:w-auto">
-            {(['전체', '3-1', '3-2', '3-3', '3-4', '셀터디'] as const).map((r) => {
+            {(['전체', '3-2', '3-3', '3-4', '셀터디'] as const).map((r) => {
               const count = r === '전체' 
                 ? students.filter(s => !s.isDeleted).length 
                 : students.filter(s => !s.isDeleted && s.classroom === r).length;
@@ -212,7 +212,6 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                         }}
                         className="bg-amber-950/30 text-amber-300 border border-amber-800/40 text-[10px] rounded px-1 py-0.5 focus:outline-none focus:border-amber-400 font-bold"
                       >
-                        <option value="3-1">3-1</option>
                         <option value="3-2">3-2</option>
                         <option value="3-3">3-3</option>
                         <option value="3-4">3-4</option>

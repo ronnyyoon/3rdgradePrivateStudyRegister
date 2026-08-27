@@ -57,7 +57,6 @@ export const AttendanceTableView: React.FC<AttendanceTableViewProps> = ({
   const roomCounts = React.useMemo(() => {
     const counts: Record<string, number> = {
       '전체': 0,
-      '3-1': 0,
       '3-2': 0,
       '3-3': 0,
       '3-4': 0,
@@ -322,14 +321,14 @@ export const AttendanceTableView: React.FC<AttendanceTableViewProps> = ({
           </button>
         </div>
 
-        {/* 교실 버튼 그룹 (토요일: 전체, 3-3, 3-4, 셀터디 4개실만 표시 / 평일: 6개실) */}
+        {/* 교실 버튼 그룹 (토요일: 전체, 3-3, 3-4, 셀터디 4개실 / 평일: 전체, 3-2, 3-3, 3-4, 셀터디 5개실) */}
         {(() => {
-          const availableRooms: ('전체' | '3-1' | '3-2' | '3-3' | '3-4' | '셀터디')[] = 
+          const availableRooms: ('전체' | Classroom)[] = 
             activeTabDay === '토' 
               ? ['전체', '3-3', '3-4', '셀터디'] 
-              : ['전체', '3-1', '3-2', '3-3', '3-4', '셀터디'];
+              : ['전체', '3-2', '3-3', '3-4', '셀터디'];
 
-          const gridColsClass = activeTabDay === '토' ? 'grid-cols-4' : 'grid-cols-6';
+          const gridColsClass = activeTabDay === '토' ? 'grid-cols-4' : 'grid-cols-5';
 
           return (
             <div className={`bg-zinc-900/80 p-0.5 sm:p-1 rounded-xl border border-zinc-850 grid ${gridColsClass} gap-0.5 sm:gap-1.5`}>

@@ -78,7 +78,6 @@ export const StudentAddModal: React.FC<StudentAddModalProps> = ({
               onChange={(e) => setAddForm({ ...addForm, classroom: e.target.value as Classroom })}
               className="w-full bg-[#262626] text-white text-xs px-3 py-2 rounded-xl border border-zinc-750 focus:outline-none focus:border-[var(--color-point-yellow)]"
             >
-              <option value="3-1">3-1 교실</option>
               <option value="3-2">3-2 교실</option>
               <option value="3-3">3-3 교실</option>
               <option value="3-4">3-4 교실</option>

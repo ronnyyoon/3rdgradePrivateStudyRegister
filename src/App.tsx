@@ -113,7 +113,7 @@ export default function App() {
   }>({
     studentId: '',
     name: '',
-    classroom: '3-1',
+    classroom: '3-2',
     notes: '',
   });
 
@@ -335,10 +335,10 @@ export default function App() {
     });
   }, [students, selectedClassroom]);
 
-  // 요일 탭 전환 핸들러 (토요일 선택 시 3-1, 3-2실에 있던 필터를 '전체'로 안전 전환)
+  // 요일 탭 전환 핸들러 (토요일 선택 시 3-2실에 있던 필터를 '전체'로 안전 전환)
   const handleTabDayChange = (day: DayOfWeek) => {
     setActiveTabDay(day);
-    if (day === '토' && (selectedClassroom === '3-1' || selectedClassroom === '3-2')) {
+    if (day === '토' && selectedClassroom === '3-2') {
       setSelectedClassroom('전체');
     }
   };
@@ -568,7 +568,7 @@ export default function App() {
       setStudents(prev => [...prev, newStudent]);
       await addStudentToFirebase(newStudent);
       setIsAddModalOpen(false);
-      setAddForm({ studentId: '', name: '', classroom: '3-1', notes: '' });
+      setAddForm({ studentId: '', name: '', classroom: '3-2', notes: '' });
       showToast(`${newStudent.name} 학생이 성공적으로 등록되었습니다.`, 'success');
     } catch (e) {
       console.error(e);

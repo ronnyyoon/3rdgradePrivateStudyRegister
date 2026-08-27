@@ -72,7 +72,7 @@ export const AttendanceStatsView: React.FC<AttendanceStatsViewProps> = ({
             <span className="text-xs font-bold text-white">자습실 대조 필터</span>
           </div>
           <div className="bg-zinc-900 p-1 rounded-xl flex gap-1 w-full sm:w-auto">
-            {(['전체', '3-1', '3-2', '3-3', '3-4', '셀터디'] as const).map((r) => (
+            {(['전체', '3-2', '3-3', '3-4', '셀터디'] as const).map((r) => (
               <button
                 key={r}
                 onClick={() => setSelectedClassroom(r)}

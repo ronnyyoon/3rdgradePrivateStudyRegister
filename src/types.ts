@@ -9,8 +9,8 @@ export type NavigationMenu = 'attendance' | 'stats' | 'admin_settings';
 // 요일 타입 정의 (월요일부터 토요일까지)
 export type DayOfWeek = '월' | '화' | '수' | '목' | '금' | '토';
 
-// 자습 교실 타입 정의
-export type Classroom = '3-1' | '3-2' | '3-3' | '3-4' | '셀터디';
+// 자습 교실 타입 정의 (3-1 자습인원 미존재로 3-2, 3-3, 3-4, 셀터디 운영)
+export type Classroom = '3-2' | '3-3' | '3-4' | '셀터디';
 
 // 출석 상태 타입 정의
 export type AttendanceStatus = '출석' | '수업' | '병결' | '개인사' | '미참여일' | '미인정결' | '미확인';
