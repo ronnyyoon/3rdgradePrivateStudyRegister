@@ -27,7 +27,7 @@ interface AttendanceTableViewProps {
   activeStudentsCount: number;
   handlePeriodClick: (studentId: string, day: DayOfWeek, period: 'p1' | 'p2' | 'p3' | 'p4') => void;
   openStudentDetail: (student: Student) => void;
-  handleDeleteStudent: (id: string, name: string) => void;
+  handleDeleteStudent: (id: string, name: string, day: DayOfWeek) => void;
   setIsAddModalOpen: (open: boolean) => void;
   batchMarkAttendance: (day: DayOfWeek, status: AttendanceStatus) => void;
 }
@@ -549,9 +549,9 @@ export const AttendanceTableView: React.FC<AttendanceTableViewProps> = ({
                             <Info className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                           </button>
                           <button
-                            onClick={() => handleDeleteStudent(student.id, student.name)}
+                            onClick={() => handleDeleteStudent(student.id, student.name, activeTabDay)}
                             className="p-1 sm:p-1.5 bg-red-950/45 hover:bg-red-950 border border-red-900/30 text-red-400 rounded transition cursor-pointer"
-                            title="학생 삭제"
+                            title="자습 명단 관리 / 제외"
                           >
                             <Trash2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                           </button>

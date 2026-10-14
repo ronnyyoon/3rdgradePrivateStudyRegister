@@ -44,6 +44,12 @@ import {
   parseDateFromYYMMDD,
   getWeekDatesForMonday,
   archiveAndResetWeek,
+  removeStudentFromSaturday,
+  removeStudentFromWeekday,
+  addStudentToSaturday,
+  addStudentToWeekday,
+  updateStudentEarlyLeave,
+  clearStudentEarlyLeave,
 } from './utils/attendanceUtils';
 
 // 분리된 뷰 및 모달 컴포넌트
@@ -51,7 +57,8 @@ import { AttendanceTableView } from './components/AttendanceTableView';
 import { AttendanceStatsView } from './components/AttendanceStatsView';
 import { AdminSettingsView } from './components/AdminSettingsView';
 import { StudentDetailModal } from './components/StudentDetailModal';
-import { StudentAddModal } from './components/StudentAddModal';
+import { StudentAddModal, StudentAddFormData } from './components/StudentAddModal';
+import { StudentDeleteModal } from './components/StudentDeleteModal';
 
 const LOCAL_STORAGE_KEY = 'highschool_nightstudy_attendance_v7_unconfirmed';
 const LOCAL_STORAGE_META_KEY = 'highschool_nightstudy_meta_v7';
@@ -105,17 +112,22 @@ export default function App() {
   const [detailIsWarning, setDetailIsWarning] = useState(false);
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [addForm, setAddForm] = useState<{
-    studentId: string;
-    name: string;
-    classroom: Classroom;
-    notes: string;
-  }>({
+  const [addForm, setAddForm] = useState<StudentAddFormData>({
     studentId: '',
     name: '',
+    participationType: 'both',
     classroom: '3-2',
+    saturdayClassroom: '3-3',
+    enableEarlyLeave: false,
+    earlyLeaveTime: '21:20',
+    earlyLeaveDays: ['월', '화', '수', '목', '금'],
     notes: '',
   });
+
+  // 분리 삭제 확인 모달 상태
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [deleteTargetStudent, setDeleteTargetStudent] = useState<Student | null>(null);
+  const [deleteModalDay, setDeleteModalDay] = useState<DayOfWeek>('월');
 
   // 토스트 메시지
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -404,20 +416,158 @@ export default function App() {
     showToast(`${day}요일 학생 출석 상태가 [${status}]로 일괄 처리되었습니다.`, 'success');
   };
 
-  // 학생 삭제 핸들러
-  const handleDeleteStudent = async (id: string, name: string) => {
-    if (!confirm(`[${name}] 학생을 자율학습 명단에서 영구 삭제(제명)하시겠습니까?`)) {
-      return;
-    }
+  // 학생 삭제 / 자습 제외 모달 오픈 핸들러
+  const handleDeleteStudent = (id: string, name: string, day: DayOfWeek = activeTabDay) => {
+    const student = students.find(s => s.id === id);
+    if (!student) return;
+    setDeleteTargetStudent(student);
+    setDeleteModalDay(day);
+    setIsDeleteModalOpen(true);
+  };
 
+  // 1. 토요일 자습에서만 학생 제외 (평일 자습은 100% 안전 보존)
+  const handleRemoveFromSaturday = async (studentId: string) => {
+    const student = students.find(s => s.id === studentId);
+    if (!student) return;
+
+    const updated = removeStudentFromSaturday(student);
+    setStudents(prev => prev.map(s => s.id === studentId ? updated : s));
     try {
-      setStudents(prev => prev.filter(s => s.id !== id));
-      await deleteStudentFromFirebase(id);
-      showToast(`${name} 학생이 성공적으로 삭제되었습니다.`, 'success');
+      await updateStudentInFirebase(studentId, {
+        attendance: updated.attendance,
+        fixedSettings: updated.fixedSettings,
+        saturdayClassroom: undefined,
+      });
+      showToast(`${student.name} 학생이 토요일 자습 명단에서 제외되었습니다. (월~금 평일 자습 유지)`, 'success');
     } catch (e) {
       console.error(e);
-      showToast('삭제 중 오류가 발생했습니다.', 'error');
+      showToast('토요일 자습 제외 처리 중 오류가 발생했습니다.', 'error');
     }
+  };
+
+  // 2. 평일(월~금) 자습에서만 학생 제외 (토요일 자습은 안전 보존)
+  const handleRemoveFromWeekday = async (studentId: string) => {
+    const student = students.find(s => s.id === studentId);
+    if (!student) return;
+
+    const updated = removeStudentFromWeekday(student);
+    setStudents(prev => prev.map(s => s.id === studentId ? updated : s));
+    try {
+      await updateStudentInFirebase(studentId, {
+        attendance: updated.attendance,
+        fixedSettings: updated.fixedSettings,
+      });
+      showToast(`${student.name} 학생이 평일 자습 명단에서 제외되었습니다. (토요일 자습 유지)`, 'success');
+    } catch (e) {
+      console.error(e);
+      showToast('평일 자습 제외 처리 중 오류가 발생했습니다.', 'error');
+    }
+  };
+
+  // 3. 전체 명단에서 완전 영구 삭제
+  const handlePermanentDelete = async (studentId: string) => {
+    const student = students.find(s => s.id === studentId);
+    const studentName = student?.name || '학생';
+    try {
+      setStudents(prev => prev.filter(s => s.id !== studentId));
+      await deleteStudentFromFirebase(studentId);
+      showToast(`${studentName} 학생이 전체 자율학습 명단에서 완전히 삭제되었습니다.`, 'success');
+    } catch (e) {
+      console.error(e);
+      showToast('영구 삭제 중 오류가 발생했습니다.', 'error');
+    }
+  };
+
+  // 4. 토요일 자습에 학생 추가 / 배정
+  const handleAddToSaturday = async (studentId: string, room: Classroom) => {
+    const student = students.find(s => s.id === studentId);
+    if (!student) return;
+
+    const updated = addStudentToSaturday(student, room);
+    setStudents(prev => prev.map(s => s.id === studentId ? updated : s));
+    try {
+      await updateStudentInFirebase(studentId, {
+        saturdayClassroom: room,
+        attendance: updated.attendance,
+        fixedSettings: updated.fixedSettings,
+      });
+      showToast(`${student.name} 학생이 토요일 [${room}] 자습실로 배정되었습니다.`, 'success');
+    } catch (e) {
+      console.error(e);
+      showToast('토요일 배정 중 오류가 발생했습니다.', 'error');
+    }
+  };
+
+  // 5. 평일 자습에 학생 추가 / 배정
+  const handleAddToWeekday = async (studentId: string, room: Classroom) => {
+    const student = students.find(s => s.id === studentId);
+    if (!student) return;
+
+    const updated = addStudentToWeekday(student, room);
+    setStudents(prev => prev.map(s => s.id === studentId ? updated : s));
+    try {
+      await updateStudentInFirebase(studentId, {
+        classroom: room,
+        attendance: updated.attendance,
+        fixedSettings: updated.fixedSettings,
+      });
+      showToast(`${student.name} 학생이 평일 [${room}] 자습실로 배정되었습니다.`, 'success');
+    } catch (e) {
+      console.error(e);
+      showToast('평일 배정 중 오류가 발생했습니다.', 'error');
+    }
+  };
+
+  // 6. 조기 하교 설정 직접 업데이트
+  const handleUpdateEarlyLeave = async (studentId: string, days: DayOfWeek[], timeText: string) => {
+    const student = students.find(s => s.id === studentId);
+    if (!student) return;
+
+    const updated = updateStudentEarlyLeave(student, days, timeText);
+    setStudents(prev => prev.map(s => s.id === studentId ? updated : s));
+    try {
+      await updateStudentInFirebase(studentId, {
+        earlyLeave: updated.earlyLeave,
+      });
+      showToast(`${student.name} 학생의 조기 하교(${days.join(',')}) [${timeText}] 설정이 저장되었습니다.`, 'success');
+    } catch (e) {
+      console.error(e);
+      showToast('조기 하교 설정 저장 중 오류가 발생했습니다.', 'error');
+    }
+  };
+
+  // 7. 조기 하교 설정 해제
+  const handleClearEarlyLeave = async (studentId: string) => {
+    const student = students.find(s => s.id === studentId);
+    if (!student) return;
+
+    const updated = clearStudentEarlyLeave(student);
+    setStudents(prev => prev.map(s => s.id === studentId ? updated : s));
+    try {
+      await updateStudentInFirebase(studentId, {
+        earlyLeave: {},
+        notes: updated.notes || '',
+      });
+      showToast(`${student.name} 학생의 조기 하교 설정이 해제되었습니다.`, 'info');
+    } catch (e) {
+      console.error(e);
+      showToast('조기 하교 해제 중 오류가 발생했습니다.', 'error');
+    }
+  };
+
+  // 관리자 설정: 평일 자습실 변경 핸들러
+  const handleWeekdayClassroomChange = (studentId: string, room: Classroom) => {
+    const student = students.find(s => s.id === studentId);
+    if (!student) return;
+
+    const updated = {
+      ...student,
+      classroom: room,
+    };
+
+    setStudents(prev => prev.map(s => s.id === studentId ? updated : s));
+    updateStudentInFirebase(studentId, { classroom: room }).catch(console.error);
+    showToast(`${student.name} 평일 자습실이 [${room}]로 변경되었습니다.`, 'success');
   };
 
   // 관리자 설정: 고정값 변경 핸들러
@@ -546,33 +696,94 @@ export default function App() {
     showToast(`${selectedStudent.name} 학생의 상세 정보가 저장되었습니다.`, 'success');
   };
 
-  // 학생 수동 등록
+  // 학생 수동 등록 (오류 없는 안전 등록 & 평일/토요/조기하교 분리 지원)
   const handleAddStudent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!addForm.studentId || !addForm.name) {
+    if (!addForm.studentId.trim() || !addForm.name.trim()) {
       showToast('학번과 이름을 모두 입력해주세요.', 'error');
       return;
     }
 
+    const trimmedId = addForm.studentId.trim();
+    const trimmedName = addForm.name.trim();
+
+    // 학번 중복 검사 (비삭제 학생 중)
+    const existing = students.find(s => !s.isDeleted && s.studentId === trimmedId);
+    if (existing) {
+      if (!confirm(`학번 ${trimmedId}(${existing.name}) 학생이 이미 등록되어 있습니다. 계속 등록하시겠습니까?`)) {
+        return;
+      }
+    }
+
+    // 기본 출석 템플릿 생성
+    const defaultAttendance = createDefaultAttendance();
+    const fixedAttendance = createDefaultAttendance();
+
+    // 참여 유형별 세팅
+    if (addForm.participationType === 'weekday') {
+      // 토요일 미참여
+      const allAbsentSaturday = { p1: '미참여일' as const, p2: '미참여일' as const, p3: '미참여일' as const, p4: '미참여일' as const };
+      defaultAttendance['토'] = { ...allAbsentSaturday };
+      fixedAttendance['토'] = { ...allAbsentSaturday };
+    } else if (addForm.participationType === 'saturday') {
+      // 평일 미참여
+      const allAbsentWeekday = { p1: '미참여일' as const, p2: '미참여일' as const, p3: '미참여일' as const };
+      (['월', '화', '수', '목', '금'] as DayOfWeek[]).forEach(d => {
+        defaultAttendance[d] = { ...allAbsentWeekday };
+        fixedAttendance[d] = { ...allAbsentWeekday };
+      });
+    }
+
+    // 조기 하교 맵 구성
+    let earlyLeaveMap: Partial<Record<DayOfWeek, string>> | undefined = undefined;
+    if (addForm.enableEarlyLeave && addForm.earlyLeaveDays.length > 0) {
+      const timeStr = addForm.earlyLeaveTime.trim();
+      const formatted = timeStr.includes('하교') ? timeStr : `${timeStr} 하교`;
+      earlyLeaveMap = {};
+      addForm.earlyLeaveDays.forEach(d => {
+        earlyLeaveMap![d] = formatted;
+      });
+    }
+
     const newStudent: Student = {
-      id: `student_${Date.now()}`,
-      studentId: addForm.studentId.trim(),
-      name: addForm.name.trim(),
+      id: `student_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      studentId: trimmedId,
+      name: trimmedName,
       classroom: addForm.classroom,
-      notes: addForm.notes.trim() || undefined,
-      attendance: createDefaultAttendance(),
+      attendance: defaultAttendance,
+      fixedSettings: fixedAttendance,
+      notes: addForm.notes.trim() || '',
       isWarning: false,
+      warningReason: '',
+      attendanceHistory: [],
     };
+
+    if (addForm.participationType !== 'weekday') {
+      newStudent.saturdayClassroom = addForm.saturdayClassroom;
+    }
+    if (earlyLeaveMap) {
+      newStudent.earlyLeave = earlyLeaveMap;
+    }
 
     try {
       setStudents(prev => [...prev, newStudent]);
       await addStudentToFirebase(newStudent);
       setIsAddModalOpen(false);
-      setAddForm({ studentId: '', name: '', classroom: '3-2', notes: '' });
+      setAddForm({
+        studentId: '',
+        name: '',
+        participationType: 'both',
+        classroom: '3-2',
+        saturdayClassroom: '3-3',
+        enableEarlyLeave: false,
+        earlyLeaveTime: '21:20',
+        earlyLeaveDays: ['월', '화', '수', '목', '금'],
+        notes: '',
+      });
       showToast(`${newStudent.name} 학생이 성공적으로 등록되었습니다.`, 'success');
     } catch (e) {
-      console.error(e);
-      showToast('학생 등록 중 오류가 발생했습니다.', 'error');
+      console.error('Student add error:', e);
+      showToast('학생 등록 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.', 'error');
     }
   };
 
@@ -779,6 +990,7 @@ export default function App() {
             filteredStudents={adminFilteredStudents}
             handleFixedSettingChange={handleFixedSettingChange}
             handleSaturdayClassroomChange={handleSaturdayClassroomChange}
+            handleWeekdayClassroomChange={handleWeekdayClassroomChange}
             forceResetAllToFixed={forceResetAllToFixed}
             resetAllFixedSettings={resetAllFixedSettings}
             restoreFromInitialRoster={restoreFromInitialRoster}
@@ -786,6 +998,14 @@ export default function App() {
             currentWeekMonday={currentMondayStr}
             lastArchivedWeekMonday={metadata?.lastArchivedWeekMonday}
             showToast={showToast}
+            setIsAddModalOpen={setIsAddModalOpen}
+            handleRemoveFromSaturday={handleRemoveFromSaturday}
+            handleRemoveFromWeekday={handleRemoveFromWeekday}
+            handleAddToSaturday={handleAddToSaturday}
+            handleAddToWeekday={handleAddToWeekday}
+            handleUpdateEarlyLeave={handleUpdateEarlyLeave}
+            handleClearEarlyLeave={handleClearEarlyLeave}
+            onOpenDeleteModal={handleDeleteStudent}
           />
         )}
 
@@ -823,6 +1043,17 @@ export default function App() {
         addForm={addForm}
         setAddForm={setAddForm}
         onSubmit={handleAddStudent}
+      />
+
+      {/* 모달 3: 자습 명단 분리 삭제/제외 확인 모달 */}
+      <StudentDeleteModal
+        isOpen={isDeleteModalOpen}
+        onClose={() => setIsDeleteModalOpen(false)}
+        student={deleteTargetStudent}
+        currentDay={deleteModalDay}
+        onRemoveFromSaturdayOnly={handleRemoveFromSaturday}
+        onRemoveFromWeekdayOnly={handleRemoveFromWeekday}
+        onPermanentDelete={handlePermanentDelete}
       />
 
     </div>

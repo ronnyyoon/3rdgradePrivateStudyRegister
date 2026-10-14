@@ -1,4 +1,4 @@
-import { DayOfWeek, AttendanceStatus, Student, PeriodAttendance, AttendanceHistoryItem } from '../types';
+import { DayOfWeek, AttendanceStatus, Student, PeriodAttendance, AttendanceHistoryItem, Classroom } from '../types';
 
 export const DAYS: DayOfWeek[] = ['월', '화', '수', '목', '금', '토'];
 
@@ -166,18 +166,25 @@ export const isSaturdayNonParticipant = (student: Student): boolean => {
 export const getStudentEarlyLeaveText = (student: Student, day: DayOfWeek): string | null => {
   if (!student) return null;
 
-  // 1. Record 형태 검사
+  // 1. Record 형태 검사 (명시적으로 설정된 경우 최우선)
   if (student.earlyLeave && typeof student.earlyLeave === 'object' && !Array.isArray(student.earlyLeave)) {
     const val = (student.earlyLeave as Record<string, string>)[day];
-    if (val) return val;
+    if (val) {
+      return val.includes('하교') ? val : `${val} 하교`;
+    }
+    // Record가 정의되어 있으나 해당 요일에 없으면 해당 요일은 조기 하교 없음
+    if (Object.keys(student.earlyLeave).length > 0) {
+      return null;
+    }
   }
 
   // 2. Array 형태 검사
   if (Array.isArray(student.earlyLeave)) {
     if (student.earlyLeave.includes(day)) return '21:20 하교';
+    if (student.earlyLeave.length > 0) return null;
   }
 
-  // 3. Notes 검사
+  // 3. Notes 검사 (earlyLeave가 명시되지 않은 기존 데이터 호환용)
   if (student.notes && (student.notes.includes('21:30') || student.notes.includes('9:30'))) {
     if (day !== '토') return '21:30 하교';
   }
@@ -185,7 +192,7 @@ export const getStudentEarlyLeaveText = (student: Student, day: DayOfWeek): stri
     if (day !== '토') return '21:20 하교';
   }
 
-  // 4. 조기 하교 확정 학생 (3512: 21:30 하교, 3503, 3515, 3520: 21:20 하교)
+  // 4. 조기 하교 확정 학생 (3512: 21:30 하교, 3503, 3515, 3520: 21:20 하교) - 초기 기본값
   if (student.studentId === '3512' && day !== '토') {
     return '21:30 하교';
   }
@@ -195,6 +202,210 @@ export const getStudentEarlyLeaveText = (student: Student, day: DayOfWeek): stri
   }
 
   return null;
+};
+
+/**
+ * 학생의 전체 조기 하교 요일 및 시간대 요약 정보 반환
+ */
+export const getStudentEarlyLeaveSummary = (student: Student): { days: DayOfWeek[]; time: string } | null => {
+  if (!student) return null;
+
+  // Record 형태
+  if (student.earlyLeave && typeof student.earlyLeave === 'object' && !Array.isArray(student.earlyLeave)) {
+    const entries = Object.entries(student.earlyLeave as Record<string, string>);
+    if (entries.length > 0) {
+      const days = entries.map(([d]) => d as DayOfWeek);
+      const timeVal = entries[0][1];
+      const time = timeVal.includes('하교') ? timeVal : `${timeVal} 하교`;
+      return { days, time };
+    }
+  }
+
+  // Array 형태
+  if (Array.isArray(student.earlyLeave) && student.earlyLeave.length > 0) {
+    return { days: student.earlyLeave as DayOfWeek[], time: '21:20 하교' };
+  }
+
+  // Notes or default legacy
+  const weekdays: DayOfWeek[] = ['월', '화', '수', '목', '금'];
+  if (student.studentId === '3512') {
+    return { days: weekdays, time: '21:30 하교' };
+  }
+  if (['3503', '3515', '3520'].includes(student.studentId)) {
+    return { days: weekdays, time: '21:20 하교' };
+  }
+  if (student.notes && student.notes.includes('21:30')) {
+    return { days: weekdays, time: '21:30 하교' };
+  }
+  if (student.notes && student.notes.includes('21:20')) {
+    return { days: weekdays, time: '21:20 하교' };
+  }
+
+  return null;
+};
+
+/**
+ * 토요일 출석부에서만 학생 제외 (월~금 평일 자습은 100% 안전하게 유지)
+ */
+export const removeStudentFromSaturday = (student: Student): Student => {
+  const allAbsentSaturday: PeriodAttendance = {
+    p1: '미참여일',
+    p2: '미참여일',
+    p3: '미참여일',
+    p4: '미참여일',
+  };
+
+  const newAttendance = {
+    ...student.attendance,
+    '토': { ...allAbsentSaturday },
+  };
+
+  const newFixed = student.fixedSettings ? {
+    ...student.fixedSettings,
+    '토': { ...allAbsentSaturday },
+  } : undefined;
+
+  const updated: Student = {
+    ...student,
+    attendance: newAttendance,
+  };
+
+  if (newFixed) {
+    updated.fixedSettings = newFixed;
+  }
+  // saturdayClassroom 속성 제거 (undefined 저장 방지)
+  delete updated.saturdayClassroom;
+
+  return updated;
+};
+
+/**
+ * 평일 출석부에서만 학생 제외 (토요일 자습은 100% 안전하게 유지)
+ */
+export const removeStudentFromWeekday = (student: Student): Student => {
+  const allAbsentWeekday: PeriodAttendance = {
+    p1: '미참여일',
+    p2: '미참여일',
+    p3: '미참여일',
+  };
+
+  const weekdays: DayOfWeek[] = ['월', '화', '수', '목', '금'];
+  const newAttendance = { ...student.attendance };
+  weekdays.forEach(d => {
+    newAttendance[d] = { ...allAbsentWeekday };
+  });
+
+  const newFixed = student.fixedSettings ? { ...student.fixedSettings } : undefined;
+  if (newFixed) {
+    weekdays.forEach(d => {
+      newFixed[d] = { ...allAbsentWeekday };
+    });
+  }
+
+  const updated: Student = {
+    ...student,
+    attendance: newAttendance,
+  };
+  if (newFixed) {
+    updated.fixedSettings = newFixed;
+  }
+
+  return updated;
+};
+
+/**
+ * 토요일 자습 명단에 학생 추가 또는 복귀
+ */
+export const addStudentToSaturday = (student: Student, room: Classroom): Student => {
+  const allActiveSaturday: PeriodAttendance = {
+    p1: '미확인',
+    p2: '미확인',
+    p3: '미확인',
+    p4: '미확인',
+  };
+
+  const newAttendance = {
+    ...student.attendance,
+    '토': { ...allActiveSaturday },
+  };
+
+  const newFixed = {
+    ...(student.fixedSettings || student.attendance),
+    '토': { ...allActiveSaturday },
+  };
+
+  return {
+    ...student,
+    saturdayClassroom: room,
+    attendance: newAttendance,
+    fixedSettings: newFixed,
+  };
+};
+
+/**
+ * 평일 자습 명단에 학생 추가 또는 복귀
+ */
+export const addStudentToWeekday = (student: Student, room: Classroom): Student => {
+  const allActiveWeekday: PeriodAttendance = {
+    p1: '미확인',
+    p2: '미확인',
+    p3: '미확인',
+  };
+
+  const weekdays: DayOfWeek[] = ['월', '화', '수', '목', '금'];
+  const newAttendance = { ...student.attendance };
+  weekdays.forEach(d => {
+    newAttendance[d] = { ...allActiveWeekday };
+  });
+
+  const newFixed = {
+    ...(student.fixedSettings || student.attendance),
+  };
+  weekdays.forEach(d => {
+    newFixed[d] = { ...allActiveWeekday };
+  });
+
+  return {
+    ...student,
+    classroom: room,
+    attendance: newAttendance,
+    fixedSettings: newFixed,
+  };
+};
+
+/**
+ * 학생의 조기 하교 시간대 업데이트
+ */
+export const updateStudentEarlyLeave = (
+  student: Student,
+  days: DayOfWeek[],
+  timeText: string
+): Student => {
+  const formattedTime = timeText.includes('하교') ? timeText.trim() : `${timeText.trim()} 하교`;
+  const earlyLeaveMap: Partial<Record<DayOfWeek, string>> = {};
+  days.forEach(d => {
+    earlyLeaveMap[d] = formattedTime;
+  });
+
+  return {
+    ...student,
+    earlyLeave: earlyLeaveMap,
+  };
+};
+
+/**
+ * 학생의 조기 하교 설정 해제
+ */
+export const clearStudentEarlyLeave = (student: Student): Student => {
+  const updated = { ...student };
+  updated.earlyLeave = {};
+  if (updated.notes && (updated.notes.includes('하교') || updated.notes.includes('21:20') || updated.notes.includes('21:30'))) {
+    updated.notes = updated.notes
+      .replace(/21:\d\d\s*하교/g, '')
+      .replace(/조기\s*하교/g, '')
+      .trim();
+  }
+  return updated;
 };
 
 /**

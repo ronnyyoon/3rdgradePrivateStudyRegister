@@ -170,12 +170,32 @@ export async function loadStudentsFromFirebase(initialStudents: Student[]): Prom
 }
 
 /**
+ * Firestore는 undefined 필드를 지원하지 않으므로, 객체 내 undefined 값을 재귀적으로 제거/정제합니다.
+ */
+export function cleanForFirestore<T>(obj: T): T {
+  if (obj === null || obj === undefined || typeof obj !== 'object') {
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(cleanForFirestore) as unknown as T;
+  }
+  const result: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      result[key] = cleanForFirestore(value);
+    }
+  }
+  return result as T;
+}
+
+/**
  * 신규 학생을 Firebase에 추가합니다.
  */
 export async function addStudentToFirebase(student: Student): Promise<void> {
   try {
+    const cleanData = cleanForFirestore(student);
     const studentDocRef = doc(db, COLLECTION_NAME, student.id);
-    await setDoc(studentDocRef, student);
+    await setDoc(studentDocRef, cleanData);
     console.log(`[Firebase] 학생 등록 완료: ${student.name}`);
   } catch (error) {
     console.error(`Firebase 학생 등록 오류 (${student.name}):`, error);
@@ -189,8 +209,9 @@ export async function addStudentToFirebase(student: Student): Promise<void> {
  */
 export async function updateStudentInFirebase(studentId: string, partial: Partial<Student>): Promise<void> {
   try {
+    const cleanData = cleanForFirestore(partial);
     const studentDocRef = doc(db, COLLECTION_NAME, studentId);
-    await setDoc(studentDocRef, partial, { merge: true });
+    await setDoc(studentDocRef, cleanData, { merge: true });
   } catch (error) {
     console.error(`Firebase 학생 업데이트 오류 (${studentId}):`, error);
     handleFirestoreError(error, OperationType.WRITE, `${COLLECTION_NAME}/${studentId}`);
@@ -220,8 +241,9 @@ export async function saveAllStudentsToFirebase(students: Student[]): Promise<vo
   try {
     const batch = writeBatch(db);
     students.forEach((student) => {
+      const cleanData = cleanForFirestore(student);
       const studentDocRef = doc(db, COLLECTION_NAME, student.id);
-      batch.set(studentDocRef, student);
+      batch.set(studentDocRef, cleanData);
     });
     await batch.commit();
     console.log(`${students.length}명의 학생 데이터가 Firebase에 성공적으로 일괄 저장되었습니다.`);
@@ -247,8 +269,9 @@ export async function replaceAllStudentsInFirebase(students: Student[]): Promise
     
     // 새 학생 명단 추가
     students.forEach((student) => {
+      const cleanData = cleanForFirestore(student);
       const studentDocRef = doc(db, COLLECTION_NAME, student.id);
-      batch.set(studentDocRef, student);
+      batch.set(studentDocRef, cleanData);
     });
     
     await batch.commit();
@@ -259,3 +282,4 @@ export async function replaceAllStudentsInFirebase(students: Student[]): Promise
     throw error;
   }
 }
+

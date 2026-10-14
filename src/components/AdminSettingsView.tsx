@@ -1,8 +1,35 @@
-import React from 'react';
-import { Sliders, Filter, RefreshCw, Calendar, Archive, CheckCircle2 } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import {
+  Sliders,
+  Filter,
+  RefreshCw,
+  Calendar,
+  Archive,
+  UserPlus,
+  Clock,
+  Trash2,
+  Plus,
+  CheckCircle2,
+  CalendarDays,
+  Building,
+  Edit2,
+  AlertTriangle,
+  X,
+  Check,
+} from 'lucide-react';
 import { Student, Classroom, DayOfWeek, AttendanceStatus } from '../types';
 import { createDefaultAttendance } from '../data';
-import { STATUS_CYCLE, getSelectStyle, getPeriodsForDay, getPeriodLabel, DAYS } from '../utils/attendanceUtils';
+import {
+  STATUS_CYCLE,
+  getSelectStyle,
+  getPeriodsForDay,
+  getPeriodLabel,
+  DAYS,
+  getStudentRoomForDay,
+  isSaturdayNonParticipant,
+  isWeekdayNonParticipant,
+  getStudentEarlyLeaveSummary,
+} from '../utils/attendanceUtils';
 
 interface AdminSettingsViewProps {
   students: Student[];
@@ -16,6 +43,7 @@ interface AdminSettingsViewProps {
     status: AttendanceStatus
   ) => void;
   handleSaturdayClassroomChange: (studentId: string, room: Classroom) => void;
+  handleWeekdayClassroomChange: (studentId: string, room: Classroom) => void;
   forceResetAllToFixed: () => void;
   resetAllFixedSettings: () => void;
   restoreFromInitialRoster: () => void;
@@ -23,6 +51,14 @@ interface AdminSettingsViewProps {
   currentWeekMonday: string;
   lastArchivedWeekMonday?: string;
   showToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
+  setIsAddModalOpen: (open: boolean) => void;
+  handleRemoveFromSaturday: (studentId: string) => void;
+  handleRemoveFromWeekday: (studentId: string) => void;
+  handleAddToSaturday: (studentId: string, room: Classroom) => void;
+  handleAddToWeekday: (studentId: string, room: Classroom) => void;
+  handleUpdateEarlyLeave: (studentId: string, days: DayOfWeek[], timeText: string) => void;
+  handleClearEarlyLeave: (studentId: string) => void;
+  onOpenDeleteModal: (student: Student, day: DayOfWeek) => void;
 }
 
 export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
@@ -32,6 +68,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
   filteredStudents,
   handleFixedSettingChange,
   handleSaturdayClassroomChange,
+  handleWeekdayClassroomChange,
   forceResetAllToFixed,
   resetAllFixedSettings,
   restoreFromInitialRoster,
@@ -39,23 +76,145 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
   currentWeekMonday,
   lastArchivedWeekMonday,
   showToast,
+  setIsAddModalOpen,
+  handleRemoveFromSaturday,
+  handleRemoveFromWeekday,
+  handleAddToSaturday,
+  handleAddToWeekday,
+  handleUpdateEarlyLeave,
+  handleClearEarlyLeave,
+  onOpenDeleteModal,
 }) => {
+  // 관리자 서브탭: 'overview'(전체 고정값 매트릭스) | 'saturday'(토요 전용 관리) | 'weekday'(평일 전용 관리) | 'early_leave'(조기 하교 관리)
+  const [adminSubTab, setAdminSubTab] = useState<'overview' | 'saturday' | 'weekday' | 'early_leave'>('overview');
+
+  // 토요일 자습실 필터
+  const [satFilterRoom, setSatFilterRoom] = useState<'전체' | Classroom>('전체');
+  // 평일 자습실 필터
+  const [weekdayFilterRoom, setWeekdayFilterRoom] = useState<'전체' | Classroom>('전체');
+
+  // 토요일 추가 모달 / 퀵 추가 상태
+  const [satAddStudentId, setSatAddStudentId] = useState<string>('');
+  const [satAddRoom, setSatAddRoom] = useState<Classroom>('3-3');
+
+  // 평일 추가 모달 / 퀵 추가 상태
+  const [weekdayAddStudentId, setWeekdayAddStudentId] = useState<string>('');
+  const [weekdayAddRoom, setWeekdayAddRoom] = useState<Classroom>('3-2');
+
+  // 조기 하교 폼 상태
+  const [earlyLeaveStudentId, setEarlyLeaveStudentId] = useState<string>('');
+  const [earlyLeaveTime, setEarlyLeaveTime] = useState<string>('21:20');
+  const [earlyLeaveDays, setEarlyLeaveDays] = useState<DayOfWeek[]>(['월', '화', '수', '목', '금']);
+
+  // 활성(비삭제) 학생 목록
+  const activeStudents = useMemo(() => students.filter((s) => !s.isDeleted), [students]);
+
+  // 토요일 참여 학생 목록 (총 N명)
+  const saturdayParticipants = useMemo(() => {
+    return activeStudents.filter((s) => !isSaturdayNonParticipant(s));
+  }, [activeStudents]);
+
+  // 평일 참여 학생 목록 (총 N명)
+  const weekdayParticipants = useMemo(() => {
+    return activeStudents.filter((s) => !isWeekdayNonParticipant(s));
+  }, [activeStudents]);
+
+  // 토요일 미참여 중인 학생 목록 (토요 추가용)
+  const saturdayNonParticipants = useMemo(() => {
+    return activeStudents.filter((s) => isSaturdayNonParticipant(s));
+  }, [activeStudents]);
+
+  // 평일 미참여 중인 학생 목록 (평일 추가용)
+  const weekdayNonParticipants = useMemo(() => {
+    return activeStudents.filter((s) => isWeekdayNonParticipant(s));
+  }, [activeStudents]);
+
+  // 조기 하교 설정된 학생 목록
+  const earlyLeaveStudents = useMemo(() => {
+    return activeStudents
+      .map((student) => {
+        const summary = getStudentEarlyLeaveSummary(student);
+        return summary ? { student, ...summary } : null;
+      })
+      .filter((item): item is { student: Student; days: DayOfWeek[]; time: string } => item !== null);
+  }, [activeStudents]);
+
+  // 토요일 탭 필터링 목록
+  const filteredSaturdayList = useMemo(() => {
+    return saturdayParticipants.filter((s) => {
+      if (satFilterRoom === '전체') return true;
+      const room = s.saturdayClassroom || s.classroom;
+      return room === satFilterRoom;
+    });
+  }, [saturdayParticipants, satFilterRoom]);
+
+  // 평일 탭 필터링 목록
+  const filteredWeekdayList = useMemo(() => {
+    return weekdayParticipants.filter((s) => {
+      if (weekdayFilterRoom === '전체') return true;
+      return s.classroom === weekdayFilterRoom;
+    });
+  }, [weekdayParticipants, weekdayFilterRoom]);
+
+  // 조기 하교 요일 토글
+  const toggleEarlyLeaveDay = (day: DayOfWeek) => {
+    setEarlyLeaveDays((prev) =>
+      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]
+    );
+  };
+
+  // 조기 하교 폼 제출
+  const handleSubmitEarlyLeave = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!earlyLeaveStudentId) {
+      showToast('대상이 될 학생을 선택해주세요.', 'error');
+      return;
+    }
+    if (earlyLeaveDays.length === 0) {
+      showToast('적용할 요일을 최소 하나 이상 선택해주세요.', 'error');
+      return;
+    }
+    if (!earlyLeaveTime.trim()) {
+      showToast('하교 시간대를 입력해주세요.', 'error');
+      return;
+    }
+
+    handleUpdateEarlyLeave(earlyLeaveStudentId, earlyLeaveDays, earlyLeaveTime.trim());
+    setEarlyLeaveStudentId('');
+    setEarlyLeaveTime('21:20');
+    setEarlyLeaveDays(['월', '화', '수', '목', '금']);
+  };
+
+  // 조기 하교 학생 선택 시 기존 설정 자동 로드
+  const handleSelectEarlyLeaveStudent = (studentId: string) => {
+    setEarlyLeaveStudentId(studentId);
+    const student = students.find((s) => s.id === studentId);
+    if (!student) return;
+
+    const summary = getStudentEarlyLeaveSummary(student);
+    if (summary) {
+      const cleanTime = summary.time.replace(/\s*하교/g, '').trim();
+      setEarlyLeaveTime(cleanTime);
+      setEarlyLeaveDays(summary.days);
+    }
+  };
+
   return (
     <div className="space-y-6">
-      {/* 1. 주간 출석 마감 & 누적 관리 카드 */}
-      <div className="bg-[#1E1E1E] p-5 rounded-2xl border border-emerald-500/20 space-y-4 shadow-xl">
+      {/* 1. 상단 액션 허브 & 주간 갱신 현황 */}
+      <div className="bg-[#1E1E1E] p-4 sm:p-5 rounded-2xl border border-emerald-500/20 space-y-4 shadow-xl">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800 pb-3">
           <div className="flex items-center space-x-2">
             <Calendar className="w-5 h-5 text-emerald-400" />
             <h4 className="font-bold text-white text-sm">주간 출석 자동 갱신 및 누적 아카이빙 현황</h4>
           </div>
-          <div className="flex items-center space-x-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
             <span className="px-2.5 py-1 bg-emerald-950/60 text-emerald-300 border border-emerald-800/50 rounded-lg font-mono font-medium">
-              현재 활성 주차 시작일: {currentWeekMonday} (월)
+              현재 활성 주차: {currentWeekMonday} (월)
             </span>
             {lastArchivedWeekMonday && (
               <span className="px-2.5 py-1 bg-zinc-800 text-zinc-400 border border-zinc-700 rounded-lg font-mono">
-                최근 누적 마감 주차: {lastArchivedWeekMonday}
+                최근 마감 주차: {lastArchivedWeekMonday}
               </span>
             )}
           </div>
@@ -63,13 +222,13 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
 
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <p className="text-zinc-400 text-xs leading-relaxed">
-            • <strong className="text-emerald-400">매주 월요일 자동 갱신</strong>: 매주 월요일이 되면 지난 주 출석 기록이 학생별 <strong className="text-white">누적 이력</strong>에 안전하게 보존되고, 이번 주 출석부가 '미확인'으로 자동 초기화됩니다.<br />
-            • 필요 시 아래 <strong className="text-amber-400">수동 마감</strong> 버튼을 클릭하여 언제든 현재 주차 기록을 즉시 누적 저장하고 새 주차로 시작할 수 있습니다.
+            • <strong className="text-emerald-400">매주 월요일 자동 갱신</strong>: 월요일이 되면 지난 주 출석 기록이 학생별 <strong className="text-white">누적 이력</strong>에 저장되고 새 주차로 시작됩니다.<br />
+            • 출석부를 미리 마감하고 싶으실 경우 <strong className="text-amber-400">수동 마감</strong> 버튼을 클릭하십시오.
           </p>
 
           <button
             onClick={handleManualWeekRollover}
-            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition flex items-center space-x-2 cursor-pointer shrink-0 shadow-lg"
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition flex items-center space-x-2 cursor-pointer shrink-0 shadow-lg"
           >
             <Archive className="w-4 h-4" />
             <span>이번 주 출석 수동 마감 & 새 주차 시작</span>
@@ -77,207 +236,918 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
         </div>
       </div>
 
-      {/* 2. 관리자 공지 및 제어 허브 */}
-      <div className="bg-zinc-900/80 p-5 rounded-2xl border border-zinc-800 space-y-3">
-        <div className="flex items-center space-x-2">
-          <Sliders className="w-5 h-5 text-[var(--color-point-yellow)]" />
-          <h4 className="font-bold text-white text-sm">자율학습 참여 기본 고정값 환경 세팅 및 명단 관리</h4>
-        </div>
-        <p className="text-zinc-400 text-xs leading-relaxed">
-          학생들이 특정 요일에 수능 수업, 모의면접, 학업상 하차 미참여가 확정되어 있는 경우 (예: 방과후 "수업", 1~2교시 "미참여일"),<br />
-          이곳에서 <strong className="text-white">학생별 기본 설정</strong> 및 <strong className="text-amber-400">토요일 자습교실</strong>을 설정하십시오.
-          해당 설정은 출석부에 즉시 연계 반영되며, 매주 초기화 시 복원 기준값이 됩니다.
-        </p>
+      {/* 2. 관리자 공통 컨트롤 바 */}
+      <div className="bg-zinc-900/90 p-4 sm:p-5 rounded-2xl border border-zinc-800 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center space-x-2">
+            <Sliders className="w-5 h-5 text-[var(--color-point-yellow)]" />
+            <h4 className="font-bold text-white text-sm">자율학습 참여 환경 세팅 및 분리 학생 관리</h4>
+          </div>
 
-        <div className="pt-2 flex flex-wrap gap-2">
+          {/* 신규 학생 수동 등록 버튼 (오류 완전 해결) */}
+          <button
+            onClick={() => setIsAddModalOpen(true)}
+            className="px-4 py-2 bg-[var(--color-point-yellow)] hover:bg-[#E6C200] text-black rounded-xl text-xs font-bold transition flex items-center space-x-1.5 cursor-pointer shadow-lg self-start sm:self-auto"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>+ 신규 학생 수동 등록</span>
+          </button>
+        </div>
+
+        <div className="pt-1 flex flex-wrap gap-2 text-xs">
           <button
             onClick={restoreFromInitialRoster}
-            className="px-4 py-2 bg-[var(--color-point-yellow)] hover:bg-[#E6C200] text-black rounded-xl text-xs font-bold transition flex items-center space-x-1.5 cursor-pointer shadow"
+            className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg font-bold transition flex items-center space-x-1.5 border border-zinc-750 cursor-pointer"
           >
-            <RefreshCw className="w-3.5 h-3.5" />
+            <RefreshCw className="w-3.5 h-3.5 text-zinc-400" />
             <span>스프레드시트 47명 최신 편성표 원본으로 재동기화</span>
           </button>
           <button
             onClick={forceResetAllToFixed}
-            className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-100 rounded-xl text-xs font-bold transition border border-zinc-700 cursor-pointer"
+            className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg font-bold transition border border-zinc-750 cursor-pointer"
           >
             🔄 지금 즉시 현재 고정값에 전체 동기화
           </button>
           <button
             onClick={resetAllFixedSettings}
-            className="px-4 py-2 bg-red-950/20 hover:bg-red-950/45 text-red-400 rounded-xl text-xs font-bold transition border border-red-900/30 cursor-pointer"
+            className="px-3 py-1.5 bg-red-950/20 hover:bg-red-950/45 text-red-400 rounded-lg font-bold transition border border-red-900/30 cursor-pointer"
           >
             ⚠️ 기본 고정값 전원 초기화
           </button>
         </div>
       </div>
 
-      {/* 2. 자습 교실 필터 단말 */}
-      <div className="bg-[#1E1E1E] p-4 rounded-2xl border border-[rgba(255,215,0,0.12)]">
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center space-x-2">
-            <Filter className="w-4 h-4 text-[var(--color-point-yellow)]" />
-            <span className="text-xs font-bold text-white">필터 설정 대상실 (평일 기준)</span>
-          </div>
-          <div className="bg-zinc-900 p-1 rounded-xl flex gap-1 w-full sm:w-auto">
-            {(['전체', '3-2', '3-3', '3-4', '셀터디'] as const).map((r) => {
-              const count = r === '전체' 
-                ? students.filter(s => !s.isDeleted).length 
-                : students.filter(s => !s.isDeleted && s.classroom === r).length;
-              return (
-                <button
-                  key={r}
-                  onClick={() => setSelectedClassroom(r)}
-                  className={`flex-1 sm:flex-none px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center space-x-1 ${
-                    selectedClassroom === r ? 'bg-[var(--color-point-yellow)] text-black' : 'text-zinc-400 hover:text-white'
-                  }`}
-                >
-                  <span>{r}</span>
-                  <span className="text-[10px] opacity-75 font-mono">({count})</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+      {/* 3. 관리자 서브 네비게이션 탭 (전체 고정값 / 토요일 자습 관리 / 평일 자습 관리 / 조기 하교 관리) */}
+      <div className="flex flex-wrap gap-2 border-b border-zinc-800 pb-3">
+        <button
+          onClick={() => setAdminSubTab('overview')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center space-x-1.5 ${
+            adminSubTab === 'overview'
+              ? 'bg-[var(--color-point-yellow)] text-black shadow-lg'
+              : 'bg-zinc-900 text-zinc-400 hover:text-white border border-zinc-800'
+          }`}
+        >
+          <Sliders className="w-4 h-4" />
+          <span>전체 기본 고정값 및 교실 설정 ({activeStudents.length}명)</span>
+        </button>
+
+        <button
+          onClick={() => setAdminSubTab('saturday')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center space-x-1.5 ${
+            adminSubTab === 'saturday'
+              ? 'bg-amber-500 text-black shadow-lg'
+              : 'bg-zinc-900 text-amber-300/80 hover:text-amber-200 border border-amber-500/20'
+          }`}
+        >
+          <CalendarDays className="w-4 h-4" />
+          <span>토요일 자습 명단 관리 (별도 관리) ({saturdayParticipants.length}명)</span>
+        </button>
+
+        <button
+          onClick={() => setAdminSubTab('weekday')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center space-x-1.5 ${
+            adminSubTab === 'weekday'
+              ? 'bg-blue-500 text-white shadow-lg'
+              : 'bg-zinc-900 text-blue-300/80 hover:text-blue-200 border border-blue-500/20'
+          }`}
+        >
+          <Building className="w-4 h-4" />
+          <span>평일(월~금) 자습 명단 관리 ({weekdayParticipants.length}명)</span>
+        </button>
+
+        <button
+          onClick={() => setAdminSubTab('early_leave')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center space-x-1.5 ${
+            adminSubTab === 'early_leave'
+              ? 'bg-purple-600 text-white shadow-lg'
+              : 'bg-zinc-900 text-purple-300/80 hover:text-purple-200 border border-purple-500/20'
+          }`}
+        >
+          <Clock className="w-4 h-4" />
+          <span>⏰ 조기 하교 학생 직접 관리 ({earlyLeaveStudents.length}명)</span>
+        </button>
       </div>
 
-      {/* 3. 개별 고정값 입력 제어 시트 */}
-      <div className="bg-[#1E1E1E] rounded-2xl border border-[rgba(255,215,0,0.12)] overflow-hidden shadow-xl">
-        <div className="px-6 py-4 border-b border-zinc-800 bg-[#262626]/30 flex items-center justify-between">
-          <h3 className="text-sm font-bold text-white">기본값 및 토요일 자습실 설정</h3>
-          <span className="text-xs text-zinc-500 font-mono">총 {filteredStudents.length}명 표시</span>
-        </div>
+      {/* ======================================================== */}
+      {/* 서브탭 1: 전체 기본 고정값 및 교실 설정 (Overview Matrix) */}
+      {/* ======================================================== */}
+      {adminSubTab === 'overview' && (
+        <div className="space-y-4">
+          {/* 자습 교실 필터 단말 */}
+          <div className="bg-[#1E1E1E] p-4 rounded-2xl border border-[rgba(255,215,0,0.12)]">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="flex items-center space-x-2">
+                <Filter className="w-4 h-4 text-[var(--color-point-yellow)]" />
+                <span className="text-xs font-bold text-white">필터 설정 대상실 (평일 기준)</span>
+              </div>
+              <div className="bg-zinc-900 p-1 rounded-xl flex gap-1 w-full sm:w-auto">
+                {(['전체', '3-2', '3-3', '3-4', '셀터디'] as const).map((r) => {
+                  const count =
+                    r === '전체'
+                      ? activeStudents.length
+                      : activeStudents.filter((s) => s.classroom === r).length;
+                  return (
+                    <button
+                      key={r}
+                      onClick={() => setSelectedClassroom(r)}
+                      className={`flex-1 sm:flex-none px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center space-x-1 ${
+                        selectedClassroom === r
+                          ? 'bg-[var(--color-point-yellow)] text-black'
+                          : 'text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      <span>{r}</span>
+                      <span className="text-[10px] opacity-75 font-mono">({count})</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-[#262626]/40 border-b border-zinc-800 text-[11px] font-bold text-zinc-400 leading-none">
-                <th className="py-4 px-3 sticky left-0 bg-[#1E1E1E] z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)]">평일실</th>
-                <th className="py-4 px-3 sticky left-[55px] bg-[#1E1E1E] z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)] text-amber-400">토요실</th>
-                <th className="py-4 px-3 sticky left-[125px] bg-[#1E1E1E] z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)]">학번</th>
-                <th className="py-4 px-3 sticky left-[180px] bg-[#1E1E1E] z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)] border-r-2 border-zinc-700/80">이름</th>
-                
-                {/* 월 */}
-                <th className="py-4 px-1 text-center text-zinc-300">월_방</th>
-                <th className="py-4 px-1 text-center text-zinc-300">월_1</th>
-                <th className="py-4 px-1 text-center text-zinc-300 border-r-2 border-zinc-700/80">월_2</th>
-                
-                {/* 화 */}
-                <th className="py-4 px-1 text-center text-zinc-300">화_방</th>
-                <th className="py-4 px-1 text-center text-zinc-300">화_1</th>
-                <th className="py-4 px-1 text-center text-zinc-300 border-r-2 border-zinc-700/80">화_2</th>
-                
-                {/* 수 */}
-                <th className="py-4 px-1 text-center text-zinc-300">수_방</th>
-                <th className="py-4 px-1 text-center text-zinc-300">수_1</th>
-                <th className="py-4 px-1 text-center text-zinc-300 border-r-2 border-zinc-700/80">수_2</th>
-                
-                {/* 목 */}
-                <th className="py-4 px-1 text-center text-zinc-300">목_방</th>
-                <th className="py-4 px-1 text-center text-zinc-300">목_1</th>
-                <th className="py-4 px-1 text-center text-zinc-300 border-r-2 border-zinc-700/80">목_2</th>
-                
-                {/* 금 */}
-                <th className="py-4 px-1 text-center text-zinc-300">금_방</th>
-                <th className="py-4 px-1 text-center text-zinc-300">금_1</th>
-                <th className="py-4 px-1 text-center text-zinc-300 border-r-2 border-zinc-700/80">금_2</th>
+          {/* 개별 고정값 입력 제어 시트 */}
+          <div className="bg-[#1E1E1E] rounded-2xl border border-[rgba(255,215,0,0.12)] overflow-hidden shadow-xl">
+            <div className="px-6 py-4 border-b border-zinc-800 bg-[#262626]/30 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white">전체 기본값 및 토요일 자습실 설정</h3>
+              <span className="text-xs text-zinc-500 font-mono">총 {filteredStudents.length}명 표시</span>
+            </div>
 
-                {/* 토 */}
-                <th className="py-4 px-1 text-center text-amber-300 bg-amber-950/10">토_오전1</th>
-                <th className="py-4 px-1 text-center text-amber-300 bg-amber-950/10">토_오전2</th>
-                <th className="py-4 px-1 text-center text-amber-300 bg-amber-950/10">토_오후3</th>
-                <th className="py-4 px-1 text-center text-amber-300 bg-amber-950/10">토_오후4</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-800 text-xs font-mono">
-              {filteredStudents.map((student) => {
-                const currentFixed = student.fixedSettings || student.attendance || createDefaultAttendance();
-                
-                return (
-                  <tr key={student.id} className="hover:bg-zinc-900/60">
-                    {/* 평일 자습실 */}
-                    <td className="py-3 px-2 sticky left-0 bg-[#1E1E1E]/95 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)]">
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-zinc-800 text-zinc-300 whitespace-nowrap">
-                        {student.classroom}
-                      </span>
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-[#262626]/40 border-b border-zinc-800 text-[11px] font-bold text-zinc-400 leading-none">
+                    <th className="py-4 px-3 sticky left-0 bg-[#1E1E1E] z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)]">평일실</th>
+                    <th className="py-4 px-3 sticky left-[55px] bg-[#1E1E1E] z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)] text-amber-400">토요실</th>
+                    <th className="py-4 px-3 sticky left-[125px] bg-[#1E1E1E] z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)]">학번</th>
+                    <th className="py-4 px-3 sticky left-[180px] bg-[#1E1E1E] z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)] border-r-2 border-zinc-700/80">이름</th>
 
-                    {/* 토요일 자습실 선택 */}
-                    <td className="py-3 px-2 sticky left-[55px] bg-[#1E1E1E]/95 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)]">
-                      <select
-                        value={student.saturdayClassroom || student.classroom}
-                        onChange={(e) => {
-                          handleSaturdayClassroomChange(student.id, e.target.value as Classroom);
-                          showToast(`${student.name} 토요일 자습실이 [${e.target.value}]로 변경되었습니다.`, 'success');
-                        }}
-                        className="bg-amber-950/30 text-amber-300 border border-amber-800/40 text-[10px] rounded px-1 py-0.5 focus:outline-none focus:border-amber-400 font-bold"
-                      >
-                        <option value="3-2">3-2</option>
-                        <option value="3-3">3-3</option>
-                        <option value="3-4">3-4</option>
-                        <option value="셀터디">셀터디</option>
-                      </select>
-                    </td>
+                    {/* 월 */}
+                    <th className="py-4 px-1 text-center text-zinc-300">월_방</th>
+                    <th className="py-4 px-1 text-center text-zinc-300">월_1</th>
+                    <th className="py-4 px-1 text-center text-zinc-300 border-r-2 border-zinc-700/80">월_2</th>
 
-                    {/* 학번 & 이름 */}
-                    <td className="py-3 px-2 sticky left-[125px] bg-[#1E1E1E]/95 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)] text-zinc-400 font-semibold text-[11px]">{student.studentId}</td>
-                    <td className="py-3 px-2 sticky left-[180px] bg-[#1E1E1E]/95 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)] font-bold text-white whitespace-nowrap border-r-2 border-zinc-700/80 text-[11px]">{student.name}</td>
-                    
-                    {/* 월~금 교시별 설정 */}
-                    {(['월', '화', '수', '목', '금'] as DayOfWeek[]).map((day) => {
-                      const pList: ('p1' | 'p2' | 'p3')[] = ['p1', 'p2', 'p3'];
-                      return pList.map((p, pIdx) => {
-                        const isLastInDay = pIdx === pList.length - 1;
-                        const val = currentFixed[day]?.[p] || '미참여일';
-                        return (
-                          <td 
-                            key={`${day}-${p}`} 
-                            className={`py-3 px-0.5 text-center ${isLastInDay ? 'border-r-2 border-zinc-700/60' : ''}`}
-                          >
-                            <select
-                              className={`text-[9.5px] px-1 py-0.8 rounded border focus:outline-none focus:border-amber-400 w-[62px] transition ${getSelectStyle(val)}`}
-                              value={val}
-                              onChange={(e) => {
-                                handleFixedSettingChange(student.id, day, p, e.target.value as AttendanceStatus);
-                                showToast(`${student.name} ${day}(${getPeriodLabel(day, p)}) 설정이 [${e.target.value}]로 변경되었습니다.`, 'success');
-                              }}
-                            >
-                              {STATUS_CYCLE.map((s) => (
-                                <option key={s} value={s} className="bg-zinc-900 text-white font-medium">{s}</option>
-                              ))}
-                            </select>
-                          </td>
-                        );
-                      });
-                    })}
+                    {/* 화 */}
+                    <th className="py-4 px-1 text-center text-zinc-300">화_방</th>
+                    <th className="py-4 px-1 text-center text-zinc-300">화_1</th>
+                    <th className="py-4 px-1 text-center text-zinc-300 border-r-2 border-zinc-700/80">화_2</th>
 
-                    {/* 토요일 (p1~p4) */}
-                    {(['p1', 'p2', 'p3', 'p4'] as const).map((p) => {
-                      const val = currentFixed['토']?.[p] || '미참여일';
-                      return (
-                        <td key={`토-${p}`} className="py-3 px-0.5 text-center bg-amber-950/10">
+                    {/* 수 */}
+                    <th className="py-4 px-1 text-center text-zinc-300">수_방</th>
+                    <th className="py-4 px-1 text-center text-zinc-300">수_1</th>
+                    <th className="py-4 px-1 text-center text-zinc-300 border-r-2 border-zinc-700/80">수_2</th>
+
+                    {/* 목 */}
+                    <th className="py-4 px-1 text-center text-zinc-300">목_방</th>
+                    <th className="py-4 px-1 text-center text-zinc-300">목_1</th>
+                    <th className="py-4 px-1 text-center text-zinc-300 border-r-2 border-zinc-700/80">목_2</th>
+
+                    {/* 금 */}
+                    <th className="py-4 px-1 text-center text-zinc-300">금_방</th>
+                    <th className="py-4 px-1 text-center text-zinc-300">금_1</th>
+                    <th className="py-4 px-1 text-center text-zinc-300 border-r-2 border-zinc-700/80">금_2</th>
+
+                    {/* 토 */}
+                    <th className="py-4 px-1 text-center text-amber-300 bg-amber-950/10">토_오전1</th>
+                    <th className="py-4 px-1 text-center text-amber-300 bg-amber-950/10">토_오전2</th>
+                    <th className="py-4 px-1 text-center text-amber-300 bg-amber-950/10">토_오후3</th>
+                    <th className="py-4 px-1 text-center text-amber-300 bg-amber-950/10">토_오후4</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-800 text-xs font-mono">
+                  {filteredStudents.map((student) => {
+                    const currentFixed = student.fixedSettings || student.attendance || createDefaultAttendance();
+
+                    return (
+                      <tr key={student.id} className="hover:bg-zinc-900/60">
+                        {/* 평일 자습실 변경 드롭다운 */}
+                        <td className="py-3 px-2 sticky left-0 bg-[#1E1E1E]/95 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)]">
                           <select
-                            className={`text-[9.5px] px-1 py-0.8 rounded border focus:outline-none focus:border-amber-400 w-[62px] transition ${getSelectStyle(val)}`}
-                            value={val}
+                            value={student.classroom}
                             onChange={(e) => {
-                              handleFixedSettingChange(student.id, '토', p, e.target.value as AttendanceStatus);
-                              showToast(`${student.name} 토(${getPeriodLabel('토', p)}) 설정이 [${e.target.value}]로 변경되었습니다.`, 'success');
+                              handleWeekdayClassroomChange(student.id, e.target.value as Classroom);
                             }}
+                            className="bg-zinc-800 text-zinc-200 border border-zinc-700 text-[10px] rounded px-1 py-0.5 focus:outline-none focus:border-amber-400 font-bold"
                           >
-                            {STATUS_CYCLE.map((s) => (
-                              <option key={s} value={s} className="bg-zinc-900 text-white font-medium">{s}</option>
-                            ))}
+                            <option value="3-2">3-2</option>
+                            <option value="3-3">3-3</option>
+                            <option value="3-4">3-4</option>
+                            <option value="셀터디">셀터디</option>
                           </select>
                         </td>
-                      );
-                    })}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+
+                        {/* 토요일 자습실 선택 */}
+                        <td className="py-3 px-2 sticky left-[55px] bg-[#1E1E1E]/95 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)]">
+                          <select
+                            value={student.saturdayClassroom || student.classroom}
+                            onChange={(e) => {
+                              handleSaturdayClassroomChange(student.id, e.target.value as Classroom);
+                              showToast(`${student.name} 토요일 자습실이 [${e.target.value}]로 변경되었습니다.`, 'success');
+                            }}
+                            className="bg-amber-950/30 text-amber-300 border border-amber-800/40 text-[10px] rounded px-1 py-0.5 focus:outline-none focus:border-amber-400 font-bold"
+                          >
+                            <option value="3-2">3-2 (비권장)</option>
+                            <option value="3-3">3-3</option>
+                            <option value="3-4">3-4</option>
+                            <option value="셀터디">셀터디</option>
+                          </select>
+                        </td>
+
+                        {/* 학번 & 이름 */}
+                        <td className="py-3 px-2 sticky left-[125px] bg-[#1E1E1E]/95 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)] text-zinc-400 font-semibold text-[11px]">
+                          {student.studentId}
+                        </td>
+                        <td className="py-3 px-2 sticky left-[180px] bg-[#1E1E1E]/95 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)] font-bold text-white whitespace-nowrap border-r-2 border-zinc-700/80 text-[11px]">
+                          {student.name}
+                        </td>
+
+                        {/* 월~금 교시별 설정 */}
+                        {(['월', '화', '수', '목', '금'] as DayOfWeek[]).map((day) => {
+                          const pList: ('p1' | 'p2' | 'p3')[] = ['p1', 'p2', 'p3'];
+                          return pList.map((p, pIdx) => {
+                            const isLastInDay = pIdx === pList.length - 1;
+                            const val = currentFixed[day]?.[p] || '미참여일';
+                            return (
+                              <td
+                                key={`${day}-${p}`}
+                                className={`py-3 px-0.5 text-center ${isLastInDay ? 'border-r-2 border-zinc-700/60' : ''}`}
+                              >
+                                <select
+                                  className={`text-[9.5px] px-1 py-0.8 rounded border focus:outline-none focus:border-amber-400 w-[62px] transition ${getSelectStyle(
+                                    val
+                                  )}`}
+                                  value={val}
+                                  onChange={(e) => {
+                                    handleFixedSettingChange(
+                                      student.id,
+                                      day,
+                                      p,
+                                      e.target.value as AttendanceStatus
+                                    );
+                                    showToast(
+                                      `${student.name} ${day}(${getPeriodLabel(day, p)}) 설정이 [${e.target.value}]로 변경되었습니다.`,
+                                      'success'
+                                    );
+                                  }}
+                                >
+                                  {STATUS_CYCLE.map((s) => (
+                                    <option key={s} value={s} className="bg-zinc-900 text-white font-medium">
+                                      {s}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                            );
+                          });
+                        })}
+
+                        {/* 토요일 (p1~p4) */}
+                        {(['p1', 'p2', 'p3', 'p4'] as const).map((p) => {
+                          const val = currentFixed['토']?.[p] || '미참여일';
+                          return (
+                            <td key={`토-${p}`} className="py-3 px-0.5 text-center bg-amber-950/10">
+                              <select
+                                className={`text-[9.5px] px-1 py-0.8 rounded border focus:outline-none focus:border-amber-400 w-[62px] transition ${getSelectStyle(
+                                  val
+                                )}`}
+                                value={val}
+                                onChange={(e) => {
+                                  handleFixedSettingChange(student.id, '토', p, e.target.value as AttendanceStatus);
+                                  showToast(
+                                    `${student.name} 토(${getPeriodLabel('토', p)}) 설정이 [${e.target.value}]로 변경되었습니다.`,
+                                    'success'
+                                  );
+                                }}
+                              >
+                                {STATUS_CYCLE.map((s) => (
+                                  <option key={s} value={s} className="bg-zinc-900 text-white font-medium">
+                                    {s}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* 서브탭 2: 토요일 자습 명단 관리 (별도 관리) */}
+      {/* ======================================================== */}
+      {adminSubTab === 'saturday' && (
+        <div className="space-y-4">
+          {/* 토요 자습 상단 안내 및 필터/추가 컨트롤 */}
+          <div className="bg-[#1E1E1E] p-4 sm:p-5 rounded-2xl border border-amber-500/30 space-y-3 shadow-xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800 pb-3">
+              <div>
+                <h4 className="font-bold text-amber-300 text-sm flex items-center space-x-1.5">
+                  <CalendarDays className="w-4 h-4 text-amber-400" />
+                  <span>토요일 자습 명단 독립 관리 (총 {saturdayParticipants.length}명 참여 중)</span>
+                </h4>
+                <p className="text-[11px] text-zinc-400 mt-1">
+                  💡 토요일 자습은 평일 자습과 완전히 분리되어 관리됩니다. 여기서 토요일 자습에서 제외하더라도 <strong className="text-white">월~금 평일 자습 명단은 유지</strong>됩니다.
+                </p>
+              </div>
+
+              {/* 토요 자습실 필터 */}
+              <div className="flex items-center space-x-1 bg-zinc-900 p-1 rounded-xl self-start sm:self-auto">
+                {(['전체', '3-3', '3-4', '셀터디'] as const).map((room) => {
+                  const count =
+                    room === '전체'
+                      ? saturdayParticipants.length
+                      : saturdayParticipants.filter((s) => (s.saturdayClassroom || s.classroom) === room).length;
+                  return (
+                    <button
+                      key={room}
+                      onClick={() => setSatFilterRoom(room)}
+                      className={`px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer flex items-center space-x-1 ${
+                        satFilterRoom === room
+                          ? 'bg-amber-500 text-black'
+                          : 'text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      <span>{room}</span>
+                      <span className="text-[10px] font-mono opacity-80">({count})</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 토요일 자습에 신규/평일 학생 추가 바 */}
+            <div className="bg-zinc-900/80 p-3 rounded-xl border border-zinc-800 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              <span className="text-xs font-bold text-amber-300 whitespace-nowrap flex items-center space-x-1">
+                <Plus className="w-3.5 h-3.5" />
+                <span>토요일 자습에 학생 배정 추가:</span>
+              </span>
+
+              <select
+                value={satAddStudentId}
+                onChange={(e) => setSatAddStudentId(e.target.value)}
+                className="bg-zinc-800 text-white text-xs px-3 py-2 rounded-lg border border-zinc-700 focus:outline-none focus:border-amber-400 flex-1"
+              >
+                <option value="">-- 토요일 미참여 학생 중 선택 --</option>
+                {saturdayNonParticipants.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.studentId} {s.name} (평일: {s.classroom})
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={satAddRoom}
+                onChange={(e) => setSatAddRoom(e.target.value as Classroom)}
+                className="bg-amber-950/40 text-amber-300 text-xs px-3 py-2 rounded-lg border border-amber-800/60 focus:outline-none focus:border-amber-400 font-bold"
+              >
+                <option value="3-3">3-3 자습실</option>
+                <option value="3-4">3-4 자습실</option>
+                <option value="셀터디">셀터디 자습실</option>
+              </select>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (!satAddStudentId) {
+                    showToast('추가할 학생을 선택해주세요.', 'error');
+                    return;
+                  }
+                  handleAddToSaturday(satAddStudentId, satAddRoom);
+                  setSatAddStudentId('');
+                }}
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold rounded-lg transition cursor-pointer whitespace-nowrap"
+              >
+                토요 자습 배정
+              </button>
+            </div>
+          </div>
+
+          {/* 토요일 전용 학생 명단 테이블 */}
+          <div className="bg-[#1E1E1E] rounded-2xl border border-[rgba(255,215,0,0.12)] overflow-hidden shadow-xl">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-[#262626]/40 border-b border-zinc-800 text-[11px] font-bold text-zinc-400 leading-none">
+                    <th className="py-4 px-3">토요 배정실</th>
+                    <th className="py-4 px-3">학번</th>
+                    <th className="py-4 px-4">이름</th>
+                    <th className="py-4 px-3 text-zinc-500">평일 자습실</th>
+                    <th className="py-4 px-2 text-center text-amber-300">토_오전1</th>
+                    <th className="py-4 px-2 text-center text-amber-300">토_오전2</th>
+                    <th className="py-4 px-2 text-center text-amber-300">토_오후3</th>
+                    <th className="py-4 px-2 text-center text-amber-300">토_오후4</th>
+                    <th className="py-4 px-4 text-right">토요 자습 관리</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-800 text-xs font-mono">
+                  {filteredSaturdayList.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="py-12 text-center text-zinc-500 font-sans">
+                        해당 자습실의 토요일 참여 학생이 없습니다.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredSaturdayList.map((student) => {
+                      const satRoom = student.saturdayClassroom || student.classroom;
+                      const currentFixed = student.fixedSettings || student.attendance || createDefaultAttendance();
+
+                      return (
+                        <tr key={student.id} className="hover:bg-zinc-900/60">
+                          {/* 토요 자습실 변경 */}
+                          <td className="py-3 px-3">
+                            <select
+                              value={satRoom}
+                              onChange={(e) => {
+                                handleSaturdayClassroomChange(student.id, e.target.value as Classroom);
+                                showToast(`${student.name} 토요일 자습실이 [${e.target.value}]로 변경되었습니다.`, 'success');
+                              }}
+                              className="bg-amber-950/40 text-amber-300 border border-amber-800/60 text-xs rounded-lg px-2 py-1 font-bold focus:outline-none focus:border-amber-400"
+                            >
+                              <option value="3-3">3-3 자습실</option>
+                              <option value="3-4">3-4 자습실</option>
+                              <option value="셀터디">셀터디</option>
+                            </select>
+                          </td>
+
+                          {/* 학번 & 이름 */}
+                          <td className="py-3 px-3 text-zinc-400 font-semibold">{student.studentId}</td>
+                          <td className="py-3 px-4 font-bold text-white whitespace-nowrap">{student.name}</td>
+
+                          {/* 평일 자습실 */}
+                          <td className="py-3 px-3 text-zinc-500 font-sans">
+                            {isWeekdayNonParticipant(student) ? (
+                              <span className="text-[10px] text-zinc-600 bg-zinc-900 px-1.5 py-0.5 rounded">
+                                평일 미참여
+                              </span>
+                            ) : (
+                              <span>평일: {student.classroom}</span>
+                            )}
+                          </td>
+
+                          {/* 토요일 1~4교시 기본 상태 */}
+                          {(['p1', 'p2', 'p3', 'p4'] as const).map((p) => {
+                            const val = currentFixed['토']?.[p] || '미참여일';
+                            return (
+                              <td key={`sat-${p}`} className="py-3 px-1 text-center bg-amber-950/5">
+                                <select
+                                  className={`text-[9.5px] px-1 py-0.8 rounded border focus:outline-none focus:border-amber-400 w-[64px] transition ${getSelectStyle(
+                                    val
+                                  )}`}
+                                  value={val}
+                                  onChange={(e) => {
+                                    handleFixedSettingChange(student.id, '토', p, e.target.value as AttendanceStatus);
+                                    showToast(
+                                      `${student.name} 토(${getPeriodLabel('토', p)}) 설정이 [${e.target.value}]로 변경되었습니다.`,
+                                      'success'
+                                    );
+                                  }}
+                                >
+                                  {STATUS_CYCLE.map((s) => (
+                                    <option key={s} value={s} className="bg-zinc-900 text-white font-medium">
+                                      {s}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                            );
+                          })}
+
+                          {/* 토요 자습 제외 컨트롤 */}
+                          <td className="py-3 px-4 text-right">
+                            <div className="flex items-center justify-end space-x-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (
+                                    window.confirm(
+                                      `[${student.name}] 학생을 토요일 자습 명단에서 제외하시겠습니까?\n(월~금 평일 자습 명단은 안전하게 유지됩니다)`
+                                    )
+                                  ) {
+                                    handleRemoveFromSaturday(student.id);
+                                  }
+                                }}
+                                className="px-2.5 py-1 bg-amber-950/40 hover:bg-amber-950/80 text-amber-300 border border-amber-800/40 rounded-lg text-xs font-bold transition cursor-pointer"
+                                title="토요일 자습에서만 제외"
+                              >
+                                토요 자습 제외
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => onOpenDeleteModal(student, '토')}
+                                className="p-1 text-zinc-500 hover:text-red-400 transition cursor-pointer"
+                                title="상세 삭제 메뉴"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* 서브탭 3: 평일(월~금) 자습 명단 관리 */}
+      {/* ======================================================== */}
+      {adminSubTab === 'weekday' && (
+        <div className="space-y-4">
+          <div className="bg-[#1E1E1E] p-4 sm:p-5 rounded-2xl border border-blue-500/30 space-y-3 shadow-xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800 pb-3">
+              <div>
+                <h4 className="font-bold text-blue-300 text-sm flex items-center space-x-1.5">
+                  <Building className="w-4 h-4 text-blue-400" />
+                  <span>평일(월~금) 자습 명단 독립 관리 (총 {weekdayParticipants.length}명 참여 중)</span>
+                </h4>
+                <p className="text-[11px] text-zinc-400 mt-1">
+                  💡 평일 자습 명단을 독립적으로 제어합니다. 평일 자습에서 제외하더라도 <strong className="text-white">토요일 자습실 명단은 유지</strong>됩니다.
+                </p>
+              </div>
+
+              {/* 평일 자습실 필터 */}
+              <div className="flex items-center space-x-1 bg-zinc-900 p-1 rounded-xl self-start sm:self-auto">
+                {(['전체', '3-2', '3-3', '3-4', '셀터디'] as const).map((room) => {
+                  const count =
+                    room === '전체'
+                      ? weekdayParticipants.length
+                      : weekdayParticipants.filter((s) => s.classroom === room).length;
+                  return (
+                    <button
+                      key={room}
+                      onClick={() => setWeekdayFilterRoom(room)}
+                      className={`px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer flex items-center space-x-1 ${
+                        weekdayFilterRoom === room
+                          ? 'bg-blue-500 text-white'
+                          : 'text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      <span>{room}</span>
+                      <span className="text-[10px] font-mono opacity-80">({count})</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 평일 자습 추가 바 */}
+            <div className="bg-zinc-900/80 p-3 rounded-xl border border-zinc-800 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              <span className="text-xs font-bold text-blue-300 whitespace-nowrap flex items-center space-x-1">
+                <Plus className="w-3.5 h-3.5" />
+                <span>평일 자습에 학생 배정 추가:</span>
+              </span>
+
+              <select
+                value={weekdayAddStudentId}
+                onChange={(e) => setWeekdayAddStudentId(e.target.value)}
+                className="bg-zinc-800 text-white text-xs px-3 py-2 rounded-lg border border-zinc-700 focus:outline-none focus:border-blue-400 flex-1"
+              >
+                <option value="">-- 평일 미참여(토요전용) 학생 중 선택 --</option>
+                {weekdayNonParticipants.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.studentId} {s.name} (토요: {s.saturdayClassroom || s.classroom})
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={weekdayAddRoom}
+                onChange={(e) => setWeekdayAddRoom(e.target.value as Classroom)}
+                className="bg-blue-950/40 text-blue-300 text-xs px-3 py-2 rounded-lg border border-blue-800/60 focus:outline-none focus:border-blue-400 font-bold"
+              >
+                <option value="3-2">3-2 자습실</option>
+                <option value="3-3">3-3 자습실</option>
+                <option value="3-4">3-4 자습실</option>
+                <option value="셀터디">셀터디 자습실</option>
+              </select>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (!weekdayAddStudentId) {
+                    showToast('추가할 학생을 선택해주세요.', 'error');
+                    return;
+                  }
+                  handleAddToWeekday(weekdayAddStudentId, weekdayAddRoom);
+                  setWeekdayAddStudentId('');
+                }}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg transition cursor-pointer whitespace-nowrap"
+              >
+                평일 자습 배정
+              </button>
+            </div>
+          </div>
+
+          {/* 평일 전용 학생 명단 테이블 */}
+          <div className="bg-[#1E1E1E] rounded-2xl border border-[rgba(255,215,0,0.12)] overflow-hidden shadow-xl">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-[#262626]/40 border-b border-zinc-800 text-[11px] font-bold text-zinc-400 leading-none">
+                    <th className="py-4 px-3">평일 배정실</th>
+                    <th className="py-4 px-3">학번</th>
+                    <th className="py-4 px-4">이름</th>
+                    <th className="py-4 px-3 text-amber-400/80">토요일 배정실</th>
+                    <th className="py-4 px-4 text-right">평일 자습 관리</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-800 text-xs font-mono">
+                  {filteredWeekdayList.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-12 text-center text-zinc-500 font-sans">
+                        해당 자습실의 평일 참여 학생이 없습니다.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredWeekdayList.map((student) => {
+                      const hasSat = !isSaturdayNonParticipant(student);
+                      const satRoom = student.saturdayClassroom || student.classroom;
+
+                      return (
+                        <tr key={student.id} className="hover:bg-zinc-900/60">
+                          <td className="py-3 px-3">
+                            <select
+                              value={student.classroom}
+                              onChange={(e) => {
+                                handleWeekdayClassroomChange(student.id, e.target.value as Classroom);
+                              }}
+                              className="bg-blue-950/40 text-blue-200 border border-blue-800/60 text-xs rounded-lg px-2 py-1 font-bold focus:outline-none focus:border-blue-400"
+                            >
+                              <option value="3-2">3-2 자습실</option>
+                              <option value="3-3">3-3 자습실</option>
+                              <option value="3-4">3-4 자습실</option>
+                              <option value="셀터디">셀터디</option>
+                            </select>
+                          </td>
+
+                          <td className="py-3 px-3 text-zinc-400 font-semibold">{student.studentId}</td>
+                          <td className="py-3 px-4 font-bold text-white whitespace-nowrap">{student.name}</td>
+
+                          <td className="py-3 px-3 text-amber-300/80 font-sans">
+                            {hasSat ? (
+                              <span className="bg-amber-950/30 px-2 py-0.5 rounded border border-amber-800/30 text-[11px]">
+                                토요일: {satRoom}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-zinc-600 bg-zinc-900 px-1.5 py-0.5 rounded">
+                                토요일 미참여
+                              </span>
+                            )}
+                          </td>
+
+                          <td className="py-3 px-4 text-right">
+                            <div className="flex items-center justify-end space-x-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (
+                                    window.confirm(
+                                      `[${student.name}] 학생을 평일(월~금) 자습 명단에서 제외하시겠습니까?${
+                                        hasSat ? '\n(토요일 자습실 명단은 안전하게 유지됩니다)' : ''
+                                      }`
+                                    )
+                                  ) {
+                                    handleRemoveFromWeekday(student.id);
+                                  }
+                                }}
+                                className="px-2.5 py-1 bg-blue-950/40 hover:bg-blue-950/80 text-blue-300 border border-blue-800/40 rounded-lg text-xs font-bold transition cursor-pointer"
+                                title="평일 자습에서만 제외"
+                              >
+                                평일 자습 제외
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => onOpenDeleteModal(student, '월')}
+                                className="p-1 text-zinc-500 hover:text-red-400 transition cursor-pointer"
+                                title="상세 삭제 메뉴"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* 서브탭 4: ⏰ 조기 하교 학생 직접 관리 (시간대 입력) */}
+      {/* ======================================================== */}
+      {adminSubTab === 'early_leave' && (
+        <div className="space-y-6">
+          {/* 조기 하교 등록 및 수정 폼 */}
+          <div className="bg-[#1E1E1E] p-5 rounded-2xl border border-purple-500/30 shadow-xl space-y-4">
+            <div className="flex items-center space-x-2 border-b border-zinc-800 pb-3">
+              <Clock className="w-5 h-5 text-purple-400" />
+              <div>
+                <h4 className="font-bold text-white text-sm">조기 하교 학생 신규 지정 및 시간대 설정</h4>
+                <p className="text-[11px] text-zinc-400">
+                  학생별로 조기 하교하는 요일과 희망 시간대(예: 21:20, 21:30 등)를 직접 등록하거나 수정할 수 있습니다.
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleSubmitEarlyLeave} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* 1. 대상 학생 선택 */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-zinc-300 block">대상 학생 선택 *</label>
+                <select
+                  value={earlyLeaveStudentId}
+                  onChange={(e) => handleSelectEarlyLeaveStudent(e.target.value)}
+                  required
+                  className="w-full bg-[#262626] text-white text-xs px-3.5 py-2.5 rounded-xl border border-zinc-750 focus:outline-none focus:border-purple-400"
+                >
+                  <option value="">-- 학생을 선택하세요 --</option>
+                  {activeStudents.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.studentId} {s.name} ({s.classroom})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 2. 하교 시간대 입력 */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-zinc-300 block">하교 시간대 입력 *</label>
+                <div className="space-y-1.5">
+                  <div className="flex gap-1">
+                    {['21:20', '21:30', '21:00', '17:00'].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setEarlyLeaveTime(preset)}
+                        className={`flex-1 py-1 rounded text-[10px] font-mono font-bold transition cursor-pointer ${
+                          earlyLeaveTime === preset
+                            ? 'bg-purple-600 text-white'
+                            : 'bg-zinc-800 text-zinc-300 hover:text-white'
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="text"
+                    required
+                    placeholder="시간대 직접 입력 (예: 21:20)"
+                    value={earlyLeaveTime}
+                    onChange={(e) => setEarlyLeaveTime(e.target.value)}
+                    className="w-full bg-[#262626] text-white text-xs px-3 py-2 rounded-xl border border-zinc-750 focus:outline-none focus:border-purple-400 font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* 3. 적용 요일 선택 */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-bold text-zinc-300 block">적용 요일 선택 *</label>
+                  <button
+                    type="button"
+                    onClick={() => setEarlyLeaveDays(['월', '화', '수', '목', '금'])}
+                    className="text-[10px] text-purple-400 hover:underline cursor-pointer"
+                  >
+                    평일 전체(월~금)
+                  </button>
+                </div>
+                <div className="grid grid-cols-6 gap-1">
+                  {DAYS.map((d) => {
+                    const isSelected = earlyLeaveDays.includes(d);
+                    return (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => toggleEarlyLeaveDay(d)}
+                        className={`py-2 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center space-x-0.5 ${
+                          isSelected
+                            ? 'bg-purple-600 text-white shadow'
+                            : 'bg-zinc-800 text-zinc-400 hover:text-white'
+                        }`}
+                      >
+                        {isSelected && <Check className="w-2.5 h-2.5" />}
+                        <span>{d}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    className="w-full py-2 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-xl transition shadow-lg flex items-center justify-center space-x-1 cursor-pointer"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>조기 하교 설정 저장</span>
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+
+          {/* 현재 조기 하교 등록 학생 목록 카드 */}
+          <div className="bg-[#1E1E1E] rounded-2xl border border-purple-500/20 overflow-hidden shadow-xl">
+            <div className="px-6 py-4 border-b border-zinc-800 bg-[#262626]/30 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white flex items-center space-x-2">
+                <Clock className="w-4 h-4 text-purple-400" />
+                <span>현재 조기 하교 등록 학생 명단 ({earlyLeaveStudents.length}명)</span>
+              </h3>
+              <span className="text-xs text-zinc-500">
+                출석부 테이블에 ({'{'}시간{'}'} 하교) 배지가 자동 표시됩니다
+              </span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-[#262626]/40 border-b border-zinc-800 text-[11px] font-bold text-zinc-400 leading-none">
+                    <th className="py-4 px-4">자습실</th>
+                    <th className="py-4 px-3">학번</th>
+                    <th className="py-4 px-4">이름</th>
+                    <th className="py-4 px-4 text-amber-300">하교 시간대</th>
+                    <th className="py-4 px-4">적용 요일</th>
+                    <th className="py-4 px-4 text-right">설정 관리</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-800 text-xs font-mono">
+                  {earlyLeaveStudents.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-12 text-center text-zinc-500 font-sans">
+                        현재 등록된 조기 하교 학생이 없습니다. 상단 폼에서 학생을 등록해주세요.
+                      </td>
+                    </tr>
+                  ) : (
+                    earlyLeaveStudents.map(({ student, days, time }) => (
+                      <tr key={student.id} className="hover:bg-zinc-900/60">
+                        <td className="py-3 px-4">
+                          <span className="bg-zinc-800 text-zinc-300 px-2 py-0.5 rounded text-[10px] font-bold">
+                            {student.classroom}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-zinc-400 font-semibold">{student.studentId}</td>
+                        <td className="py-3 px-4 font-bold text-white whitespace-nowrap">{student.name}</td>
+                        <td className="py-3 px-4">
+                          <span className="inline-flex items-center space-x-1 text-amber-300 bg-amber-950/60 border border-amber-500/50 px-2 py-0.5 rounded-md font-bold text-xs">
+                            <Clock className="w-3 h-3 text-amber-400 shrink-0" />
+                            <span>{time}</span>
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 font-sans text-zinc-300">
+                          <div className="flex gap-1">
+                            {days.map((d) => (
+                              <span key={d} className="bg-purple-950/50 text-purple-300 border border-purple-800/50 px-1.5 py-0.5 rounded text-[10px] font-bold">
+                                {d}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <div className="flex items-center justify-end space-x-2">
+                            <button
+                              type="button"
+                              onClick={() => handleSelectEarlyLeaveStudent(student.id)}
+                              className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs font-bold transition cursor-pointer flex items-center space-x-1"
+                            >
+                              <Edit2 className="w-3 h-3" />
+                              <span>수정</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (window.confirm(`[${student.name}] 학생의 조기 하교 설정을 해제하시겠습니까?`)) {
+                                  handleClearEarlyLeave(student.id);
+                                }
+                              }}
+                              className="px-2.5 py-1 bg-red-950/40 hover:bg-red-950/70 text-red-400 border border-red-900/40 rounded-lg text-xs font-bold transition cursor-pointer"
+                            >
+                              해제
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
