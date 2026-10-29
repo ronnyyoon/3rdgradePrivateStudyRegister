@@ -26,7 +26,7 @@ export const StudentDeleteModal: React.FC<StudentDeleteModalProps> = ({
   if (!isOpen || !student) return null;
 
   const isSat = currentDay === '토';
-  const hasSaturday = !isSaturdayNonParticipant(student);
+  const hasSaturday = !isSaturdayNonParticipant(student) || !!student.saturdayClassroom;
   const hasWeekday = !isWeekdayNonParticipant(student);
   const participatesBoth = hasSaturday && hasWeekday;
 

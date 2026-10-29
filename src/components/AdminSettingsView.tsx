@@ -111,7 +111,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
 
   // 토요일 참여 학생 목록 (총 N명)
   const saturdayParticipants = useMemo(() => {
-    return activeStudents.filter((s) => !isSaturdayNonParticipant(s));
+    return activeStudents.filter((s) => !isSaturdayNonParticipant(s) || !!s.saturdayClassroom);
   }, [activeStudents]);
 
   // 평일 참여 학생 목록 (총 N명)
@@ -121,7 +121,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
 
   // 토요일 미참여 중인 학생 목록 (토요 추가용)
   const saturdayNonParticipants = useMemo(() => {
-    return activeStudents.filter((s) => isSaturdayNonParticipant(s));
+    return activeStudents.filter((s) => isSaturdayNonParticipant(s) && !s.saturdayClassroom);
   }, [activeStudents]);
 
   // 평일 미참여 중인 학생 목록 (평일 추가용)
@@ -411,6 +411,9 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                     <th className="py-4 px-1 text-center text-amber-300 bg-amber-950/10">토_오전2</th>
                     <th className="py-4 px-1 text-center text-amber-300 bg-amber-950/10">토_오후3</th>
                     <th className="py-4 px-1 text-center text-amber-300 bg-amber-950/10">토_오후4</th>
+
+                    {/* 명단 삭제 관리 */}
+                    <th className="py-4 px-3 text-center text-rose-400 sticky right-0 bg-[#1E1E1E] z-10 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.3)]">삭제</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800 text-xs font-mono">
@@ -457,7 +460,17 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                           {student.studentId}
                         </td>
                         <td className="py-3 px-2 sticky left-[180px] bg-[#1E1E1E]/95 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)] font-bold text-white whitespace-nowrap border-r-2 border-zinc-700/80 text-[11px]">
-                          {student.name}
+                          <div className="flex items-center justify-between space-x-1.5">
+                            <span>{student.name}</span>
+                            <button
+                              type="button"
+                              onClick={() => onOpenDeleteModal(student, '월')}
+                              className="p-1 rounded text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer"
+                              title={`${student.name} 학생 삭제 / 자습 제외`}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </td>
 
                         {/* 월~금 교시별 설정 */}
@@ -527,6 +540,19 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                             </td>
                           );
                         })}
+
+                        {/* 학생 삭제 / 자습 제외 버튼 */}
+                        <td className="py-3 px-2 text-center sticky right-0 bg-[#1E1E1E]/95 z-10 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.3)]">
+                          <button
+                            type="button"
+                            onClick={() => onOpenDeleteModal(student, '월')}
+                            className="p-1.5 rounded-lg text-zinc-400 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer inline-flex items-center space-x-1"
+                            title={`${student.name} 학생 삭제 / 자습 제외`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span className="text-[10px] hidden xl:inline text-rose-400/80">삭제</span>
+                          </button>
+                        </td>
                       </tr>
                     );
                   })}

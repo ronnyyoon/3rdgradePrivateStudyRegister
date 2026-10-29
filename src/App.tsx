@@ -63,9 +63,39 @@ import { StudentDeleteModal } from './components/StudentDeleteModal';
 const LOCAL_STORAGE_KEY = 'highschool_nightstudy_attendance_v7_unconfirmed';
 const LOCAL_STORAGE_META_KEY = 'highschool_nightstudy_meta_v7';
 
-// Helper: 학생 출석 데이터 공란('미참여일') 정규화 보장
+// Helper: 학생 출석 데이터 공란('미참여일') 정규화 보장 및 신규 등록 학생 안전 복구
 function normalizeStudentAttendance(student: Student): Student {
   const normAttendance = { ...student.attendance };
+
+  // 신규 등록 버그로 인해 월~토 전 교시가 '미참여일'로 남아있던 학생 자동 복구
+  const allDaysEmpty = DAYS.every(d => {
+    const pData = normAttendance[d];
+    if (!pData) return true;
+    const periods = getPeriodsForDay(d);
+    return periods.every(p => !pData[p] || pData[p] === '미참여일');
+  });
+
+  if (allDaysEmpty) {
+    const weekdays: DayOfWeek[] = ['월', '화', '수', '목', '금'];
+    weekdays.forEach(d => {
+      normAttendance[d] = { p1: '미확인', p2: '미확인', p3: '미확인' };
+    });
+    if (student.saturdayClassroom) {
+      normAttendance['토'] = { p1: '미확인', p2: '미확인', p3: '미확인', p4: '미확인' };
+    }
+  } else if (student.saturdayClassroom) {
+    const sat = normAttendance['토'];
+    const satAllEmpty = !sat || (
+      (sat.p1 === '미참여일' || !sat.p1) &&
+      (sat.p2 === '미참여일' || !sat.p2) &&
+      (sat.p3 === '미참여일' || !sat.p3) &&
+      (sat.p4 === '미참여일' || !sat.p4)
+    );
+    if (satAllEmpty && (student.id.startsWith('student_') || !student.id.startsWith('st_'))) {
+      normAttendance['토'] = { p1: '미확인', p2: '미확인', p3: '미확인', p4: '미확인' };
+    }
+  }
+
   DAYS.forEach(d => {
     const periods = getPeriodsForDay(d);
     const dayData = { ...(normAttendance[d] || {}) };
@@ -715,24 +745,25 @@ export default function App() {
       }
     }
 
-    // 기본 출석 템플릿 생성
-    const defaultAttendance = createDefaultAttendance();
-    const fixedAttendance = createDefaultAttendance();
+    // 참여 일정 구분 (both: 평일+토요, weekday: 평일만, saturday: 토요만)
+    const isWeekday = addForm.participationType === 'both' || addForm.participationType === 'weekday';
+    const isSaturday = addForm.participationType === 'both' || addForm.participationType === 'saturday';
 
-    // 참여 유형별 세팅
-    if (addForm.participationType === 'weekday') {
-      // 토요일 미참여
-      const allAbsentSaturday = { p1: '미참여일' as const, p2: '미참여일' as const, p3: '미참여일' as const, p4: '미참여일' as const };
-      defaultAttendance['토'] = { ...allAbsentSaturday };
-      fixedAttendance['토'] = { ...allAbsentSaturday };
-    } else if (addForm.participationType === 'saturday') {
-      // 평일 미참여
-      const allAbsentWeekday = { p1: '미참여일' as const, p2: '미참여일' as const, p3: '미참여일' as const };
-      (['월', '화', '수', '목', '금'] as DayOfWeek[]).forEach(d => {
-        defaultAttendance[d] = { ...allAbsentWeekday };
-        fixedAttendance[d] = { ...allAbsentWeekday };
-      });
-    }
+    const allActiveWeekday = { p1: '미확인' as const, p2: '미확인' as const, p3: '미확인' as const };
+    const allAbsentWeekday = { p1: '미참여일' as const, p2: '미참여일' as const, p3: '미참여일' as const };
+    const allActiveSaturday = { p1: '미확인' as const, p2: '미확인' as const, p3: '미확인' as const, p4: '미확인' as const };
+    const allAbsentSaturday = { p1: '미참여일' as const, p2: '미참여일' as const, p3: '미참여일' as const, p4: '미참여일' as const };
+
+    const defaultAttendance: Student['attendance'] = {
+      '월': isWeekday ? { ...allActiveWeekday } : { ...allAbsentWeekday },
+      '화': isWeekday ? { ...allActiveWeekday } : { ...allAbsentWeekday },
+      '수': isWeekday ? { ...allActiveWeekday } : { ...allAbsentWeekday },
+      '목': isWeekday ? { ...allActiveWeekday } : { ...allAbsentWeekday },
+      '금': isWeekday ? { ...allActiveWeekday } : { ...allAbsentWeekday },
+      '토': isSaturday ? { ...allActiveSaturday } : { ...allAbsentSaturday },
+    };
+
+    const fixedAttendance: Student['attendance'] = JSON.parse(JSON.stringify(defaultAttendance));
 
     // 조기 하교 맵 구성
     let earlyLeaveMap: Partial<Record<DayOfWeek, string>> | undefined = undefined;
@@ -749,7 +780,7 @@ export default function App() {
       id: `student_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
       studentId: trimmedId,
       name: trimmedName,
-      classroom: addForm.classroom,
+      classroom: isWeekday ? addForm.classroom : (addForm.saturdayClassroom || '3-3'),
       attendance: defaultAttendance,
       fixedSettings: fixedAttendance,
       notes: addForm.notes.trim() || '',
@@ -758,7 +789,7 @@ export default function App() {
       attendanceHistory: [],
     };
 
-    if (addForm.participationType !== 'weekday') {
+    if (isSaturday) {
       newStudent.saturdayClassroom = addForm.saturdayClassroom;
     }
     if (earlyLeaveMap) {
