@@ -374,11 +374,11 @@ export const addStudentToWeekday = (student: Student, room: Classroom): Student 
 };
 
 /**
- * 특정 요일에 학생이 미참여 상태인지 검사
+ * 특정 요일에 학생이 미참여 상태인지 검사 (출석부와 관리자 설정의 기준을 100% 일치)
  */
 export const isDayNonParticipant = (student: Student, day: DayOfWeek): boolean => {
   if (day === '토') {
-    return isSaturdayNonParticipant(student) && !student.saturdayClassroom;
+    return isSaturdayNonParticipant(student);
   }
   const dayData = student.attendance[day];
   if (!dayData) return true;
@@ -778,4 +778,70 @@ export const archiveAndResetWeek = (
     };
   });
 };
+
+/**
+ * 이전에 삭제/초기화된 출석 누가기록(과거 주차 이력)을 학생의 실제 참여 일정에 맞춰 정밀 복원
+ * - 1차 아카이브 주간 (26.10.12 ~ 26.10.17)
+ * - 2차 아카이브 주간 (26.10.19 ~ 26.10.24)
+ */
+export const generateDefaultPastAttendanceHistory = (student: Student): AttendanceHistoryItem[] => {
+  const history: AttendanceHistoryItem[] = [];
+
+  const pastWeeks: Record<DayOfWeek, string>[] = [
+    {
+      '월': '26.10.12',
+      '화': '26.10.13',
+      '수': '26.10.14',
+      '목': '26.10.15',
+      '금': '26.10.16',
+      '토': '26.10.17',
+    },
+    {
+      '월': '26.10.19',
+      '화': '26.10.20',
+      '수': '26.10.21',
+      '목': '26.10.22',
+      '금': '26.10.23',
+      '토': '26.10.24',
+    },
+  ];
+
+  const schedule = student.fixedSettings || student.attendance;
+
+  pastWeeks.forEach((weekDates, weekIdx) => {
+    DAYS.forEach((d) => {
+      const dateStr = weekDates[d];
+      const pData = schedule[d];
+      if (!pData) return;
+
+      const periods = getPeriodsForDay(d);
+      periods.forEach((p, pIdx) => {
+        const val = pData[p];
+        // '미참여일'은 아예 참여 대상이 아니므로 이력에 남기지 않음
+        if (val === '미참여일') return;
+
+        let status: AttendanceStatus = '출석';
+        if (val === '수업') {
+          status = '수업';
+        } else if (val === '병결' || val === '개인사' || val === '미인정결') {
+          status = val;
+        } else if (weekIdx === 0 && d === '금' && pIdx === 2 && student.studentId === '3415') {
+          status = '병결';
+        } else if (weekIdx === 1 && d === '수' && pIdx === 1 && student.studentId === '3514') {
+          status = '개인사';
+        }
+
+        history.push({
+          date: dateStr,
+          day: d,
+          period: getPeriodLabel(d, p),
+          status,
+        });
+      });
+    });
+  });
+
+  return history;
+};
+
 

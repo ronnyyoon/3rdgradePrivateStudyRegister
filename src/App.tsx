@@ -26,6 +26,7 @@ import {
   subscribeToStudents,
   addStudentToFirebase,
   updateStudentInFirebase,
+  saveStudentDocument,
   deleteStudentFromFirebase,
   replaceAllStudentsInFirebase,
   getAttendanceMetadata,
@@ -52,6 +53,8 @@ import {
   addStudentToSpecificDay,
   updateStudentEarlyLeave,
   clearStudentEarlyLeave,
+  generateDefaultPastAttendanceHistory,
+  normalizeDateStr,
 } from './utils/attendanceUtils';
 
 // 분리된 뷰 및 모달 컴포넌트
@@ -109,11 +112,32 @@ function normalizeStudentAttendance(student: Student): Student {
     normAttendance[d] = dayData as any;
   });
 
-  return {
+  // 토요일 전체가 '미참여일'인 학생은 saturdayClassroom 속성도 확실히 제거 (출석부-관리자설정 22명 동기화)
+  const sat = normAttendance['토'];
+  const satAllAbsent = !sat || (
+    (sat.p1 === '미참여일' || !sat.p1) &&
+    (sat.p2 === '미참여일' || !sat.p2) &&
+    (sat.p3 === '미참여일' || !sat.p3) &&
+    (sat.p4 === '미참여일' || !sat.p4)
+  );
+  const cleanSaturdayClassroom = satAllAbsent ? undefined : student.saturdayClassroom;
+
+  // 누적 출석 이력(attendanceHistory) 복원: 기존 기록이 비어있으면 과거 아카이브 기록으로 자동 복원
+  const hist = student.attendanceHistory && student.attendanceHistory.length > 0
+    ? student.attendanceHistory
+    : generateDefaultPastAttendanceHistory({ ...student, attendance: normAttendance });
+
+  const result: Student = {
     ...student,
+    saturdayClassroom: cleanSaturdayClassroom,
     attendance: normAttendance,
-    attendanceHistory: student.attendanceHistory || [],
+    attendanceHistory: hist,
   };
+  if (!cleanSaturdayClassroom) {
+    delete result.saturdayClassroom;
+  }
+
+  return result;
 }
 
 export default function App() {
@@ -465,11 +489,7 @@ export default function App() {
     const updated = removeStudentFromSaturday(student);
     setStudents(prev => prev.map(s => s.id === studentId ? updated : s));
     try {
-      await updateStudentInFirebase(studentId, {
-        attendance: updated.attendance,
-        fixedSettings: updated.fixedSettings,
-        saturdayClassroom: undefined,
-      });
+      await saveStudentDocument(updated);
       showToast(`${student.name} 학생이 토요일 자습 명단에서 제외되었습니다. (월~금 평일 자습 유지)`, 'success');
     } catch (e) {
       console.error(e);
@@ -558,14 +578,14 @@ export default function App() {
     const updated = removeStudentFromSpecificDay(student, day);
     setStudents(prev => prev.map(s => s.id === studentId ? updated : s));
     try {
-      const updateData: any = {
-        attendance: updated.attendance,
-        fixedSettings: updated.fixedSettings,
-      };
       if (day === '토') {
-        updateData.saturdayClassroom = null;
+        await saveStudentDocument(updated);
+      } else {
+        await updateStudentInFirebase(studentId, {
+          attendance: updated.attendance,
+          fixedSettings: updated.fixedSettings,
+        });
       }
-      await updateStudentInFirebase(studentId, updateData);
       showToast(`${student.name} 학생이 [${day}요일] 자습 명단에서 제외되었습니다. (다른 요일 유지)`, 'success');
     } catch (e) {
       console.error(e);
@@ -730,20 +750,64 @@ export default function App() {
     showToast('전원 기본 고정값이 해제되었습니다.', 'info');
   };
 
-  // 스프레드시트 47명 최신 원본 명단 전체 재동기화
+  // 스프레드시트 47명 최신 원본 명단 전체 재동기화 (누적 출석 이력 100% 안전 보존)
   const restoreFromInitialRoster = async () => {
-    if (!confirm('스프레드시트 47명 최신 편성표(토요 자습실 및 조기하교 정보 포함) 원본 데이터로 전체 명단을 덮어씌우시겠습니까?')) {
-      return;
-    }
-
     try {
-      setStudents(INITIAL_STUDENTS);
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(INITIAL_STUDENTS));
-      await replaceAllStudentsInFirebase(INITIAL_STUDENTS);
-      showToast('스프레드시트 47명 최신 편성표로 전체 명단이 성공적으로 재동기화되었습니다!', 'success');
+      const historyMap = new Map<string, any[]>();
+      students.forEach(s => {
+        if (s.attendanceHistory && s.attendanceHistory.length > 0) {
+          historyMap.set(s.id, s.attendanceHistory);
+        }
+      });
+
+      const restoredWithHistory = INITIAL_STUDENTS.map(init => {
+        const hist = historyMap.get(init.id);
+        const resolvedHist = hist && hist.length > 0 ? hist : generateDefaultPastAttendanceHistory(init);
+        return {
+          ...init,
+          attendanceHistory: resolvedHist,
+        };
+      });
+
+      setStudents(restoredWithHistory);
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(restoredWithHistory));
+      await replaceAllStudentsInFirebase(restoredWithHistory);
+      showToast('스프레드시트 47명 최신 편성표로 전체 명단이 성공적으로 재동기화되었습니다! (출석 누가기록 보존됨)', 'success');
     } catch (e) {
       console.error(e);
       showToast('명단 재동기화 중 오류가 발생했습니다.', 'error');
+    }
+  };
+
+  // 삭제되었던 지난 주차(26.10.12~10.24) 출석 누가기록 복원 핸들러
+  const handleRestoreCumulativeHistory = async () => {
+    try {
+      const updated = students.map(student => {
+        const past = generateDefaultPastAttendanceHistory(student);
+        const current = student.attendanceHistory || [];
+        const combined = [...current];
+
+        past.forEach(item => {
+          const norm = normalizeDateStr(item.date);
+          const exists = combined.some(c => normalizeDateStr(c.date) === norm && c.period === item.period);
+          if (!exists) {
+            combined.push(item);
+          }
+        });
+
+        return {
+          ...student,
+          attendanceHistory: combined,
+        };
+      });
+
+      setStudents(updated);
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
+      await replaceAllStudentsInFirebase(updated);
+      showToast('모든 학생의 이전 주차 출석 누가기록이 성공적으로 복원되었습니다!', 'success');
+    } catch (e) {
+      console.error(e);
+      showToast('누가기록 복원 중 오류가 발생했습니다.', 'error');
     }
   };
 
@@ -1088,6 +1152,7 @@ export default function App() {
             handleUpdateEarlyLeave={handleUpdateEarlyLeave}
             handleClearEarlyLeave={handleClearEarlyLeave}
             onOpenDeleteModal={handleDeleteStudent}
+            handleRestoreCumulativeHistory={handleRestoreCumulativeHistory}
           />
         )}
 

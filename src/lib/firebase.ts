@@ -220,6 +220,21 @@ export async function updateStudentInFirebase(studentId: string, partial: Partia
 }
 
 /**
+ * 특정 학생의 전체 문서를 Firebase에 덮어써서 저장합니다 (미포함된 필드/속성 완전 제거).
+ */
+export async function saveStudentDocument(student: Student): Promise<void> {
+  try {
+    const cleanData = cleanForFirestore(student);
+    const studentDocRef = doc(db, COLLECTION_NAME, student.id);
+    await setDoc(studentDocRef, cleanData);
+  } catch (error) {
+    console.error(`Firebase 학생 전체 문서 저장 오류 (${student.id}):`, error);
+    handleFirestoreError(error, OperationType.WRITE, `${COLLECTION_NAME}/${student.id}`);
+    throw error;
+  }
+}
+
+/**
  * 학생을 Firebase에서 완전히 삭제합니다.
  */
 export async function deleteStudentFromFirebase(studentId: string): Promise<void> {

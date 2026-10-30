@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { AlertTriangle, Trash2, X, ShieldAlert, Check, Calendar } from 'lucide-react';
+import { AlertTriangle, X, ShieldAlert, Check, Calendar } from 'lucide-react';
 import { Student, DayOfWeek } from '../types';
 import { isSaturdayNonParticipant, isWeekdayNonParticipant, isDayNonParticipant } from '../utils/attendanceUtils';
 
@@ -30,7 +30,7 @@ export const StudentDeleteModal: React.FC<StudentDeleteModalProps> = ({
   if (!isOpen || !student) return null;
 
   const isSat = currentDay === '토';
-  const hasSaturday = !isSaturdayNonParticipant(student) || !!student.saturdayClassroom;
+  const hasSaturday = !isSaturdayNonParticipant(student);
   const hasWeekday = !isWeekdayNonParticipant(student);
   const participatesBoth = hasSaturday && hasWeekday;
   const participatesCurrentDay = !isDayNonParticipant(student, currentDay);
@@ -144,7 +144,7 @@ export const StudentDeleteModal: React.FC<StudentDeleteModalProps> = ({
               >
                 <div className="space-y-0.5">
                   <div className="flex items-center space-x-1.5">
-                    <Trash2 className="w-3.5 h-3.5" />
+                    <Calendar className="w-3.5 h-3.5 text-amber-400" />
                     <span>토요일 자습에서만 제외</span>
                   </div>
                   <p className="text-[10px] text-zinc-400">
@@ -167,7 +167,7 @@ export const StudentDeleteModal: React.FC<StudentDeleteModalProps> = ({
               >
                 <div className="space-y-0.5">
                   <div className="flex items-center space-x-1.5">
-                    <Trash2 className="w-3.5 h-3.5" />
+                    <Calendar className="w-3.5 h-3.5 text-blue-400" />
                     <span>평일(월~금) 전체 자습에서 제외</span>
                   </div>
                   <p className="text-[10px] text-zinc-400">

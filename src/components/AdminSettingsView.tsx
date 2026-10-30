@@ -7,7 +7,6 @@ import {
   Archive,
   UserPlus,
   Clock,
-  Trash2,
   Plus,
   CheckCircle2,
   CalendarDays,
@@ -64,6 +63,7 @@ interface AdminSettingsViewProps {
   handleUpdateEarlyLeave: (studentId: string, days: DayOfWeek[], timeText: string) => void;
   handleClearEarlyLeave: (studentId: string) => void;
   onOpenDeleteModal: (student: Student, day: DayOfWeek) => void;
+  handleRestoreCumulativeHistory?: () => void;
 }
 
 export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
@@ -91,6 +91,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
   handleUpdateEarlyLeave,
   handleClearEarlyLeave,
   onOpenDeleteModal,
+  handleRestoreCumulativeHistory,
 }) => {
   // 관리자 서브탭:
   // 'overview'(전체 고정값 매트릭스) | 'day_roster'(각 요일별 명단 관리) | 'saturday'(토요 전용 관리) | 'weekday'(평일 전용 관리) | 'early_leave'(조기 하교 관리)
@@ -167,9 +168,9 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
     });
   }, [currentDayParticipants, dayFilterRoom, selectedDayRoster]);
 
-  // 토요일 참여 학생 목록 (총 N명)
+  // 토요일 참여 학생 목록 (출석부 기준과 100% 동일하게 통일)
   const saturdayParticipants = useMemo(() => {
-    return activeStudents.filter((s) => !isSaturdayNonParticipant(s) || !!s.saturdayClassroom);
+    return activeStudents.filter((s) => !isSaturdayNonParticipant(s));
   }, [activeStudents]);
 
   // 평일 참여 학생 목록 (총 N명)
@@ -179,7 +180,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
 
   // 토요일 미참여 중인 학생 목록 (토요 추가용)
   const saturdayNonParticipants = useMemo(() => {
-    return activeStudents.filter((s) => isSaturdayNonParticipant(s) && !s.saturdayClassroom);
+    return activeStudents.filter((s) => isSaturdayNonParticipant(s));
   }, [activeStudents]);
 
   // 평일 미참여 중인 학생 목록 (평일 추가용)
@@ -332,6 +333,16 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
           >
             ⚠️ 기본 고정값 전원 초기화
           </button>
+          {handleRestoreCumulativeHistory && (
+            <button
+              onClick={handleRestoreCumulativeHistory}
+              className="px-3 py-1.5 bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 rounded-lg font-bold transition border border-emerald-800/40 cursor-pointer flex items-center space-x-1.5"
+              title="이전에 삭제/초기화된 지난 주차 출석 누가기록 복원"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              <span>📋 지난 출석 누가기록 복원</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -569,7 +580,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                 </span>
               </div>
               <div className="text-[11px] text-zinc-400">
-                🔴 [요일 제외]: 해당 요일만 미참여 처리 | 🗑️ [상세 삭제]: 영구 제명 또는 선택 삭제
+                🔴 [{selectedDayRoster} 제외]: 해당 요일만 미참여 처리 | ⚠️ [전체 영구 제명]: 전 요일 완전 삭제
               </div>
             </div>
 
@@ -586,7 +597,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                         {getPeriodLabel(selectedDayRoster, p)}
                       </th>
                     ))}
-                    <th className="py-4 px-4 text-right w-44">명단 관리 (추가/삭제)</th>
+                    <th className="py-4 px-4 text-right w-52">명단 관리 (제외 / 제명)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800 text-xs font-mono">
@@ -704,20 +715,20 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                                 onClick={() => {
                                   handleRemoveFromSpecificDay(student.id, selectedDayRoster);
                                 }}
-                                className="px-2.5 py-1 bg-amber-950/40 hover:bg-amber-950/80 text-amber-300 border border-amber-800/40 rounded-lg text-xs font-bold transition cursor-pointer flex items-center space-x-1"
+                                className="px-2.5 py-1.5 bg-amber-950/40 hover:bg-amber-900/60 text-amber-300 border border-amber-800/50 rounded-lg text-xs font-bold transition cursor-pointer whitespace-nowrap shadow-sm"
                                 title={`${selectedDayRoster}요일 자습에서만 제외 (다른 요일은 안전 보존)`}
                               >
-                                <span>{selectedDayRoster}요일 제외</span>
+                                {selectedDayRoster} 제외
                               </button>
 
-                              {/* 2. 상세 삭제 모달 열기 (영구 삭제 및 다중 옵션) */}
+                              {/* 2. 전체 명단 영구 제명 버튼 */}
                               <button
                                 type="button"
                                 onClick={() => onOpenDeleteModal(student, selectedDayRoster)}
-                                className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-red-500/10 transition cursor-pointer"
-                                title="상세 삭제 / 영구 삭제 메뉴"
+                                className="px-2.5 py-1.5 bg-red-950/30 hover:bg-red-900/60 text-red-400 border border-red-900/40 rounded-lg text-xs font-bold transition cursor-pointer whitespace-nowrap shadow-sm"
+                                title="전체 명단에서 완전 영구 제명"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                전체 영구 제명
                               </button>
                             </div>
                           </td>
@@ -843,17 +854,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
 
                           <td className="py-3 px-2 text-zinc-400 font-semibold">{student.studentId}</td>
                           <td className="py-3 px-3 font-bold text-white whitespace-nowrap">
-                            <div className="flex items-center space-x-1.5">
-                              <span>{student.name}</span>
-                              <button
-                                type="button"
-                                onClick={() => onOpenDeleteModal(student, '월')}
-                                className="opacity-40 hover:opacity-100 text-rose-400 hover:text-rose-300 transition cursor-pointer p-0.5"
-                                title={`${student.name} 학생 삭제`}
-                              >
-                                <Trash2 className="w-3 h-3" />
-                              </button>
-                            </div>
+                            <span>{student.name}</span>
                           </td>
 
                           {/* 월~금 (p1~p3) */}
@@ -915,15 +916,14 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                           })}
 
                           {/* 학생 삭제 버튼 */}
-                          <td className="py-3 px-2 text-center sticky right-0 bg-[#1E1E1E]/95 z-10 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.3)]">
+                          <td className="py-3 px-3 text-center sticky right-0 bg-[#1E1E1E]/95 z-10 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.3)]">
                             <button
                               type="button"
                               onClick={() => onOpenDeleteModal(student, '월')}
-                              className="p-1.5 rounded-lg text-zinc-400 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer inline-flex items-center space-x-1"
-                              title={`${student.name} 학생 삭제 / 자습 제외`}
+                              className="px-2.5 py-1 bg-red-950/40 hover:bg-red-900/60 text-red-400 border border-red-800/40 rounded-lg text-xs font-bold transition cursor-pointer whitespace-nowrap shadow-sm"
+                              title={`${student.name} 학생 전체 명단 영구 제명`}
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
-                              <span className="text-[10px] hidden xl:inline text-rose-400/80">삭제</span>
+                              전체 영구 제명
                             </button>
                           </td>
                         </tr>
@@ -1124,23 +1124,23 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
 
                           {/* 토요 자습 제외 / 삭제 컨트롤 */}
                           <td className="py-3 px-4 text-right">
-                            <div className="flex items-center justify-end space-x-2">
+                            <div className="flex items-center justify-end space-x-1.5">
                               <button
                                 type="button"
                                 onClick={() => handleRemoveFromSaturday(student.id)}
-                                className="px-2.5 py-1 bg-amber-950/40 hover:bg-amber-950/80 text-amber-300 border border-amber-800/40 rounded-lg text-xs font-bold transition cursor-pointer"
-                                title="토요일 자습에서만 제외"
+                                className="px-2.5 py-1.5 bg-amber-950/40 hover:bg-amber-900/60 text-amber-300 border border-amber-800/50 rounded-lg text-xs font-bold transition cursor-pointer whitespace-nowrap shadow-sm"
+                                title="토요일 자습에서만 제외 (평일 안전 유지)"
                               >
-                                토요 자습 제외
+                                토요 제외
                               </button>
 
                               <button
                                 type="button"
                                 onClick={() => onOpenDeleteModal(student, '토')}
-                                className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-red-500/10 transition cursor-pointer"
-                                title="상세 삭제 / 영구 삭제 메뉴"
+                                className="px-2.5 py-1.5 bg-red-950/30 hover:bg-red-900/60 text-red-400 border border-red-900/40 rounded-lg text-xs font-bold transition cursor-pointer whitespace-nowrap shadow-sm"
+                                title="전체 명단에서 완전 영구 제명"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                전체 영구 제명
                               </button>
                             </div>
                           </td>
@@ -1312,23 +1312,23 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                           </td>
 
                           <td className="py-3 px-4 text-right">
-                            <div className="flex items-center justify-end space-x-2">
+                            <div className="flex items-center justify-end space-x-1.5">
                               <button
                                 type="button"
                                 onClick={() => handleRemoveFromWeekday(student.id)}
-                                className="px-2.5 py-1 bg-blue-950/40 hover:bg-blue-950/80 text-blue-300 border border-blue-800/40 rounded-lg text-xs font-bold transition cursor-pointer"
-                                title="평일 자습에서만 제외"
+                                className="px-2.5 py-1.5 bg-blue-950/40 hover:bg-blue-900/60 text-blue-300 border border-blue-800/50 rounded-lg text-xs font-bold transition cursor-pointer whitespace-nowrap shadow-sm"
+                                title="평일 자습에서만 제외 (토요일 안전 유지)"
                               >
-                                평일 자습 제외
+                                평일 제외
                               </button>
 
                               <button
                                 type="button"
                                 onClick={() => onOpenDeleteModal(student, '월')}
-                                className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-red-500/10 transition cursor-pointer"
-                                title="상세 삭제 / 영구 삭제 메뉴"
+                                className="px-2.5 py-1.5 bg-red-950/30 hover:bg-red-900/60 text-red-400 border border-red-900/40 rounded-lg text-xs font-bold transition cursor-pointer whitespace-nowrap shadow-sm"
+                                title="전체 명단에서 완전 영구 제명"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                전체 영구 제명
                               </button>
                             </div>
                           </td>
