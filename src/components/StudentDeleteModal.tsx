@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { AlertTriangle, Trash2, X, ShieldAlert, Check } from 'lucide-react';
+import { AlertTriangle, Trash2, X, ShieldAlert, Check, Calendar } from 'lucide-react';
 import { Student, DayOfWeek } from '../types';
-import { isSaturdayNonParticipant, isWeekdayNonParticipant } from '../utils/attendanceUtils';
+import { isSaturdayNonParticipant, isWeekdayNonParticipant, isDayNonParticipant } from '../utils/attendanceUtils';
 
 interface StudentDeleteModalProps {
   isOpen: boolean;
@@ -11,6 +11,7 @@ interface StudentDeleteModalProps {
   currentDay: DayOfWeek;
   onRemoveFromSaturdayOnly: (studentId: string) => void;
   onRemoveFromWeekdayOnly: (studentId: string) => void;
+  onRemoveFromSpecificDay?: (studentId: string, day: DayOfWeek) => void;
   onPermanentDelete: (studentId: string) => void;
 }
 
@@ -21,14 +22,29 @@ export const StudentDeleteModal: React.FC<StudentDeleteModalProps> = ({
   currentDay,
   onRemoveFromSaturdayOnly,
   onRemoveFromWeekdayOnly,
+  onRemoveFromSpecificDay,
   onPermanentDelete,
 }) => {
+  const [confirmPermanent, setConfirmPermanent] = useState(false);
+
   if (!isOpen || !student) return null;
 
   const isSat = currentDay === '토';
   const hasSaturday = !isSaturdayNonParticipant(student) || !!student.saturdayClassroom;
   const hasWeekday = !isWeekdayNonParticipant(student);
   const participatesBoth = hasSaturday && hasWeekday;
+  const participatesCurrentDay = !isDayNonParticipant(student, currentDay);
+
+  const handleRemoveCurrentDay = () => {
+    if (onRemoveFromSpecificDay) {
+      onRemoveFromSpecificDay(student.id, currentDay);
+    } else if (currentDay === '토') {
+      onRemoveFromSaturdayOnly(student.id);
+    } else {
+      onRemoveFromWeekdayOnly(student.id);
+    }
+    onClose();
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 focus:outline-none">
@@ -45,7 +61,13 @@ export const StudentDeleteModal: React.FC<StudentDeleteModalProps> = ({
               {student.name} ({student.studentId}) 자습 명단 관리
             </h3>
           </div>
-          <button onClick={onClose} className="text-zinc-400 hover:text-white cursor-pointer">
+          <button
+            onClick={() => {
+              setConfirmPermanent(false);
+              onClose();
+            }}
+            className="text-zinc-400 hover:text-white cursor-pointer"
+          >
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -60,6 +82,11 @@ export const StudentDeleteModal: React.FC<StudentDeleteModalProps> = ({
               </span>
             </div>
 
+            <div className="text-[11px] text-zinc-400">
+              현재 선택된 기준 요일: <strong className="text-amber-400">{currentDay}요일</strong>
+              {participatesCurrentDay ? ' (현재 참여 중)' : ' (현재 미참여)'}
+            </div>
+
             {isSat && participatesBoth && (
               <div className="bg-amber-950/30 border border-amber-800/40 p-2.5 rounded-lg text-amber-300 space-y-1">
                 <p className="font-bold">💡 토요일 자습만 제외할 수 있습니다.</p>
@@ -71,40 +98,56 @@ export const StudentDeleteModal: React.FC<StudentDeleteModalProps> = ({
 
             {!isSat && participatesBoth && (
               <div className="bg-blue-950/30 border border-blue-800/40 p-2.5 rounded-lg text-blue-300 space-y-1">
-                <p className="font-bold">💡 평일 자습만 제외할 수 있습니다.</p>
+                <p className="font-bold">💡 평일 또는 해당 요일 자습만 제외할 수 있습니다.</p>
                 <p className="text-[11px] text-blue-200/80 leading-relaxed">
-                  평일 출석부에서 제외하더라도 <strong className="text-white underline">토요일 자습 명단은 유지</strong>됩니다.
+                  해당 요일에서 제외하더라도 <strong className="text-white underline">다른 요일 및 토요일 자습 명단은 안전하게 유지</strong>됩니다.
                 </p>
               </div>
             )}
           </div>
 
           <p className="text-zinc-400 leading-relaxed">
-            원하시는 작업을 선택해 주세요:
+            원하시는 제외/삭제 방식을 선택해 주세요:
           </p>
 
           {/* 작업 선택 버튼 목록 */}
           <div className="space-y-2 pt-1">
-            {/* 1. 토요일 자습에서만 제외 (토요일 탭이거나 토요 참여 중일 때) */}
-            {hasSaturday && (
+            {/* 1. 현재 기준 요일에서만 제외 (해당 요일 참여 중일 때) */}
+            {participatesCurrentDay && (
+              <button
+                type="button"
+                onClick={handleRemoveCurrentDay}
+                className="w-full p-3 bg-zinc-800 hover:bg-zinc-750 text-amber-300 border border-amber-500/40 rounded-xl font-bold flex items-center justify-between transition cursor-pointer text-left"
+              >
+                <div className="space-y-0.5">
+                  <div className="flex items-center space-x-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                    <span>[{currentDay}요일] 자습에서만 제외</span>
+                  </div>
+                  <p className="text-[10px] text-zinc-400">
+                    {currentDay}요일 출석부에서만 빠지고, 나머지 다른 요일 명단은 그대로 안전하게 유지됩니다.
+                  </p>
+                </div>
+                <span className="text-xs font-mono">→</span>
+              </button>
+            )}
+
+            {/* 2. 토요일 자습에서만 제외 (토요일 탭이 아니더라도 토요 참여 중일 때) */}
+            {hasSaturday && currentDay !== '토' && (
               <button
                 type="button"
                 onClick={() => {
                   onRemoveFromSaturdayOnly(student.id);
                   onClose();
                 }}
-                className={`w-full p-3 rounded-xl font-bold flex items-center justify-between transition cursor-pointer text-left ${
-                  isSat
-                    ? 'bg-amber-500 hover:bg-amber-400 text-black shadow-lg'
-                    : 'bg-zinc-800 hover:bg-zinc-700 text-amber-300 border border-amber-500/30'
-                }`}
+                className="w-full p-3 rounded-xl font-bold flex items-center justify-between transition cursor-pointer text-left bg-zinc-800 hover:bg-zinc-700 text-amber-300 border border-amber-500/30"
               >
                 <div className="space-y-0.5">
                   <div className="flex items-center space-x-1.5">
                     <Trash2 className="w-3.5 h-3.5" />
                     <span>토요일 자습에서만 제외</span>
                   </div>
-                  <p className={`text-[10px] ${isSat ? 'text-black/80' : 'text-zinc-400'}`}>
+                  <p className="text-[10px] text-zinc-400">
                     토요일 출석부에서 빠지고, 월~금 평일 명단은 그대로 유지됩니다.
                   </p>
                 </div>
@@ -112,7 +155,7 @@ export const StudentDeleteModal: React.FC<StudentDeleteModalProps> = ({
               </button>
             )}
 
-            {/* 2. 평일(월~금) 자습에서만 제외 (평일 탭이거나 평일 참여 중일 때) */}
+            {/* 3. 평일(월~금) 전체 자습에서만 제외 */}
             {hasWeekday && (
               <button
                 type="button"
@@ -120,18 +163,14 @@ export const StudentDeleteModal: React.FC<StudentDeleteModalProps> = ({
                   onRemoveFromWeekdayOnly(student.id);
                   onClose();
                 }}
-                className={`w-full p-3 rounded-xl font-bold flex items-center justify-between transition cursor-pointer text-left ${
-                  !isSat && participatesBoth
-                    ? 'bg-amber-500 hover:bg-amber-400 text-black shadow-lg'
-                    : 'bg-zinc-800 hover:bg-zinc-700 text-blue-300 border border-blue-500/30'
-                }`}
+                className="w-full p-3 rounded-xl font-bold flex items-center justify-between transition cursor-pointer text-left bg-zinc-800 hover:bg-zinc-700 text-blue-300 border border-blue-500/30"
               >
                 <div className="space-y-0.5">
                   <div className="flex items-center space-x-1.5">
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>평일(월~금) 자습에서만 제외</span>
+                    <span>평일(월~금) 전체 자습에서 제외</span>
                   </div>
-                  <p className={`text-[10px] ${!isSat && participatesBoth ? 'text-black/80' : 'text-zinc-400'}`}>
+                  <p className="text-[10px] text-zinc-400">
                     월~금 평일 출석부에서 빠지고, 토요일 명단은 그대로 유지됩니다.
                   </p>
                 </div>
@@ -139,37 +178,67 @@ export const StudentDeleteModal: React.FC<StudentDeleteModalProps> = ({
               </button>
             )}
 
-            {/* 3. 전체 명단에서 완전 영구 삭제 */}
-            <button
-              type="button"
-              onClick={() => {
-                if (window.confirm(`[${student.name}] 학생을 전체 자율학습 명단에서 완전히 영구 삭제(제명)하시겠습니까?`)) {
-                  onPermanentDelete(student.id);
-                  onClose();
-                }
-              }}
-              className="w-full p-3 bg-red-950/30 hover:bg-red-950/60 text-red-400 border border-red-900/40 rounded-xl font-bold flex items-center justify-between transition cursor-pointer text-left"
-            >
-              <div className="space-y-0.5">
-                <div className="flex items-center space-x-1.5">
-                  <ShieldAlert className="w-3.5 h-3.5 text-red-500" />
-                  <span>전체 명단에서 완전 영구 삭제</span>
+            {/* 4. 전체 명단에서 완전 영구 삭제 */}
+            {!confirmPermanent ? (
+              <button
+                type="button"
+                onClick={() => setConfirmPermanent(true)}
+                className="w-full p-3 bg-red-950/30 hover:bg-red-950/60 text-red-400 border border-red-900/40 rounded-xl font-bold flex items-center justify-between transition cursor-pointer text-left"
+              >
+                <div className="space-y-0.5">
+                  <div className="flex items-center space-x-1.5">
+                    <ShieldAlert className="w-3.5 h-3.5 text-red-500" />
+                    <span>전체 명단에서 완전 영구 삭제</span>
+                  </div>
+                  <p className="text-[10px] text-zinc-500">
+                    평일과 토요일을 포함하여 데이터베이스에서 영구히 제명합니다.
+                  </p>
                 </div>
-                <p className="text-[10px] text-zinc-500">
-                  평일과 토요일을 포함하여 데이터베이스에서 영구히 제명합니다.
+                <span className="text-xs font-mono">→</span>
+              </button>
+            ) : (
+              <div className="p-3 bg-red-950/70 border border-red-800/80 rounded-xl space-y-2 animate-in fade-in">
+                <p className="text-red-300 font-bold text-xs flex items-center space-x-1.5">
+                  <ShieldAlert className="w-4 h-4 text-red-400 shrink-0" />
+                  <span>정말 [{student.name}] 학생을 영구 삭제하시겠습니까?</span>
                 </p>
+                <p className="text-[11px] text-zinc-300 leading-relaxed">
+                  모든 요일의 출석부 및 기록에서 완전히 제거됩니다. 이 작업은 되돌릴 수 없습니다.
+                </p>
+                <div className="flex gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onPermanentDelete(student.id);
+                      setConfirmPermanent(false);
+                      onClose();
+                    }}
+                    className="flex-1 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-bold text-xs cursor-pointer shadow transition"
+                  >
+                    네, 완전히 영구 삭제합니다
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmPermanent(false)}
+                    className="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs font-bold cursor-pointer transition"
+                  >
+                    취소
+                  </button>
+                </div>
               </div>
-              <span className="text-xs font-mono">→</span>
-            </button>
+            )}
           </div>
 
           <div className="pt-2 flex justify-end">
             <button
               type="button"
-              onClick={onClose}
+              onClick={() => {
+                setConfirmPermanent(false);
+                onClose();
+              }}
               className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-bold transition cursor-pointer"
             >
-              취소
+              닫기
             </button>
           </div>
         </div>

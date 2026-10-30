@@ -374,6 +374,86 @@ export const addStudentToWeekday = (student: Student, room: Classroom): Student 
 };
 
 /**
+ * 특정 요일에 학생이 미참여 상태인지 검사
+ */
+export const isDayNonParticipant = (student: Student, day: DayOfWeek): boolean => {
+  if (day === '토') {
+    return isSaturdayNonParticipant(student) && !student.saturdayClassroom;
+  }
+  const dayData = student.attendance[day];
+  if (!dayData) return true;
+  const periods = getPeriodsForDay(day);
+  return periods.every(p => !dayData[p] || dayData[p] === '미참여일');
+};
+
+/**
+ * 특정 요일 자습 명단에서만 학생 제외 (다른 요일은 안전하게 보존)
+ */
+export const removeStudentFromSpecificDay = (student: Student, day: DayOfWeek): Student => {
+  if (day === '토') {
+    return removeStudentFromSaturday(student);
+  }
+  const periods = getPeriodsForDay(day);
+  const absentPeriods: any = {};
+  periods.forEach(p => {
+    absentPeriods[p] = '미참여일';
+  });
+
+  const newAttendance = {
+    ...student.attendance,
+    [day]: { ...absentPeriods },
+  };
+
+  const newFixed = student.fixedSettings ? {
+    ...student.fixedSettings,
+    [day]: { ...absentPeriods },
+  } : undefined;
+
+  const updated: Student = {
+    ...student,
+    attendance: newAttendance,
+  };
+  if (newFixed) {
+    updated.fixedSettings = newFixed;
+  }
+  return updated;
+};
+
+/**
+ * 특정 요일 자습 명단에 학생 추가 또는 복귀
+ */
+export const addStudentToSpecificDay = (student: Student, day: DayOfWeek, room?: Classroom): Student => {
+  if (day === '토') {
+    return addStudentToSaturday(student, room || student.saturdayClassroom || '3-3');
+  }
+  const periods = getPeriodsForDay(day);
+  const activePeriods: any = {};
+  periods.forEach(p => {
+    activePeriods[p] = '미확인';
+  });
+
+  const newAttendance = {
+    ...student.attendance,
+    [day]: { ...activePeriods },
+  };
+
+  const newFixed = {
+    ...(student.fixedSettings || student.attendance),
+    [day]: { ...activePeriods },
+  };
+
+  const updated: Student = {
+    ...student,
+    attendance: newAttendance,
+    fixedSettings: newFixed,
+  };
+  if (room) {
+    updated.classroom = room;
+  }
+  return updated;
+};
+
+/**
  * 학생의 조기 하교 시간대 업데이트
  */
 export const updateStudentEarlyLeave = (

@@ -48,6 +48,8 @@ import {
   removeStudentFromWeekday,
   addStudentToSaturday,
   addStudentToWeekday,
+  removeStudentFromSpecificDay,
+  addStudentToSpecificDay,
   updateStudentEarlyLeave,
   clearStudentEarlyLeave,
 } from './utils/attendanceUtils';
@@ -548,6 +550,53 @@ export default function App() {
     }
   };
 
+  // 5-1. 특정 요일 자습에서만 학생 제외 (다른 요일은 안전하게 보존)
+  const handleRemoveFromSpecificDay = async (studentId: string, day: DayOfWeek) => {
+    const student = students.find(s => s.id === studentId);
+    if (!student) return;
+
+    const updated = removeStudentFromSpecificDay(student, day);
+    setStudents(prev => prev.map(s => s.id === studentId ? updated : s));
+    try {
+      const updateData: any = {
+        attendance: updated.attendance,
+        fixedSettings: updated.fixedSettings,
+      };
+      if (day === '토') {
+        updateData.saturdayClassroom = null;
+      }
+      await updateStudentInFirebase(studentId, updateData);
+      showToast(`${student.name} 학생이 [${day}요일] 자습 명단에서 제외되었습니다. (다른 요일 유지)`, 'success');
+    } catch (e) {
+      console.error(e);
+      showToast(`${day}요일 자습 제외 처리 중 오류가 발생했습니다.`, 'error');
+    }
+  };
+
+  // 5-2. 특정 요일 자습에 학생 추가 / 배정
+  const handleAddToSpecificDay = async (studentId: string, day: DayOfWeek, room?: Classroom) => {
+    const student = students.find(s => s.id === studentId);
+    if (!student) return;
+
+    const updated = addStudentToSpecificDay(student, day, room);
+    setStudents(prev => prev.map(s => s.id === studentId ? updated : s));
+    try {
+      const updateData: any = {
+        attendance: updated.attendance,
+        fixedSettings: updated.fixedSettings,
+        classroom: updated.classroom,
+      };
+      if (day === '토') {
+        updateData.saturdayClassroom = updated.saturdayClassroom || room || '3-3';
+      }
+      await updateStudentInFirebase(studentId, updateData);
+      showToast(`${student.name} 학생이 [${day}요일] 자습 명단에 추가되었습니다.`, 'success');
+    } catch (e) {
+      console.error(e);
+      showToast(`${day}요일 자습 추가 중 오류가 발생했습니다.`, 'error');
+    }
+  };
+
   // 6. 조기 하교 설정 직접 업데이트
   const handleUpdateEarlyLeave = async (studentId: string, days: DayOfWeek[], timeText: string) => {
     const student = students.find(s => s.id === studentId);
@@ -1034,6 +1083,8 @@ export default function App() {
             handleRemoveFromWeekday={handleRemoveFromWeekday}
             handleAddToSaturday={handleAddToSaturday}
             handleAddToWeekday={handleAddToWeekday}
+            handleRemoveFromSpecificDay={handleRemoveFromSpecificDay}
+            handleAddToSpecificDay={handleAddToSpecificDay}
             handleUpdateEarlyLeave={handleUpdateEarlyLeave}
             handleClearEarlyLeave={handleClearEarlyLeave}
             onOpenDeleteModal={handleDeleteStudent}
@@ -1084,6 +1135,7 @@ export default function App() {
         currentDay={deleteModalDay}
         onRemoveFromSaturdayOnly={handleRemoveFromSaturday}
         onRemoveFromWeekdayOnly={handleRemoveFromWeekday}
+        onRemoveFromSpecificDay={handleRemoveFromSpecificDay}
         onPermanentDelete={handlePermanentDelete}
       />
 
